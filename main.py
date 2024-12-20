@@ -1,8 +1,9 @@
 import math
 import time
+import random
 
 class AwaleGame:
-    def __init__(self, player1_is_human=True, player2_is_human=True):
+    def __init__(self, player1_type="human", player2_type="ai"):
         # Initial board: each hole has [2 red, 2 blue]
         self.board = [[2, 2] for _ in range(16)]
         # Scores for players [player1_score, player2_score]
@@ -13,17 +14,21 @@ class AwaleGame:
             2: [i for i in range(1, 16, 2)]
         }
         self.current_player = 1
+        self.turn_number = 1
 
-        # Set whether each player is human or AI
-        self.player1_is_human = player1_is_human
-        self.player2_is_human = player2_is_human
+        # Set player types: "human", "ai", or "random"
+        self.player1_type = player1_type
+        self.player2_type = player2_type
 
-    def display_board(self):
-        """Display the board in a simple linear fashion."""
-        print("\nPlateau (dans l'ordre horaire) :")
-        print(" " + "     ".join(f"{i+1:2}" for i in range(16)))
-        print(" " + " ".join(f"{hole}" for hole in self.board))
-        print(f"\nScores: Joueur 1 = {self.scores[0]}, Joueur 2 = {self.scores[1]}")
+    def display_state(self, move=None, ai_time=None, depth=None):
+        """Compact display of game state."""
+        board_state = " ".join(f"{hole}" for hole in self.board)
+        info = f"Tour {self.turn_number} | Plateau: {board_state} | Scores: J1={self.scores[0]} J2={self.scores[1]} | Joueur {self.current_player}"
+        if move:
+            info += f" joue {move}"
+        if ai_time is not None and depth is not None:
+            info += f" | Temps IA: {ai_time:.2f}s | Profondeur: {depth}"
+        print(info)
 
     def is_valid_move(self, hole, color):
         if hole not in self.player_holes[self.current_player]:
@@ -60,6 +65,7 @@ class AwaleGame:
 
         self.apply_capture(current_index)
         self.current_player = 3 - self.current_player
+        self.turn_number += 1
 
     def apply_capture(self, start_hole):
         current_index = start_hole
@@ -91,10 +97,11 @@ class AwaleGame:
             return "Égalité"
 
     def clone(self):
-        new_game = AwaleGame(self.player1_is_human, self.player2_is_human)
+        new_game = AwaleGame(self.player1_type, self.player2_type)
         new_game.board = [h[:] for h in self.board]
         new_game.scores = self.scores[:]
         new_game.current_player = self.current_player
+        new_game.turn_number = self.turn_number
         return new_game
 
     def get_valid_moves(self):
@@ -149,7 +156,6 @@ class AwaleGame:
             return min_eval, best_move
 
     def best_move(self, max_time=2):
-        """Find the best move using iterative deepening within max_time seconds."""
         start_time = time.time()
         depth = 1
         best_move = None
@@ -164,25 +170,24 @@ class AwaleGame:
                 if move is not None:
                     best_move = move
             except Exception:
-                break  # If something goes wrong, return the last best move
+                break
 
             depth += 1
 
-        print(f"Temps de calcul : {time.time() - start_time:.2f}s, profondeur atteinte : {depth - 1}")
-        return best_move
+        elapsed_time = time.time() - start_time
+        return best_move, elapsed_time, depth
+
+    def random_move(self):
+        moves = self.get_valid_moves()
+        return random.choice(moves) if moves else None
 
 
 if __name__ == "__main__":
-    player1_is_human = True
-    player2_is_human = False
-
-    game = AwaleGame(player1_is_human=player1_is_human, player2_is_human=player2_is_human)
-    game.display_board()
+    game = AwaleGame(player1_type="random", player2_type="ai")
 
     while not game.game_over():
-        print(f"\nTour du Joueur {game.current_player}")
-
-        if (game.current_player == 1 and game.player1_is_human) or (game.current_player == 2 and game.player2_is_human):
+        if game.current_player == 1 and game.player1_type == "human":
+            game.display_state()
             hole = int(input("Choisissez un trou (1-16) : ")) - 1
             color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
             try:
@@ -190,13 +195,26 @@ if __name__ == "__main__":
             except ValueError as e:
                 print(e)
                 continue
-        else:
-            move = game.best_move(max_time=2)
-            if move is None:
-                break
-            print(f"L'IA (Joueur {game.current_player}) joue le trou {move[0]+1}, couleur {'Rouge' if move[1] == 0 else 'Bleu'}.")
+        elif game.current_player == 1 and game.player1_type == "random":
+            move = game.random_move()
             game.play_move(move[0], move[1])
-
-        game.display_board()
+            game.display_state(f"Trou {move[0]+1}, Couleur {'Rouge' if move[1] == 0 else 'Bleu'}")
+        elif game.current_player == 2 and game.player2_type == "human":
+            game.display_state()
+            hole = int(input("Choisissez un trou (1-16) : ")) - 1
+            color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
+            try:
+                game.play_move(hole, color)
+            except ValueError as e:
+                print(e)
+                continue
+        elif game.current_player == 2 and game.player2_type == "random":
+            move = game.random_move()
+            game.play_move(move[0], move[1])
+            game.display_state(f"Trou {move[0]+1}, Couleur {'Rouge' if move[1] == 0 else 'Bleu'}")
+        else:
+            move, ai_time, depth = game.best_move(max_time=2)
+            game.play_move(move[0], move[1])
+            game.display_state(f"Trou {move[0]+1}, Couleur {'Rouge' if move[1] == 0 else 'Bleu'}", ai_time, depth)
 
     print(f"\nPartie terminée ! Le gagnant est : {game.get_winner()}")
