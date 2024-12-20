@@ -1,62 +1,56 @@
+import math
+
 class AwaleGame:
-    def __init__(self):
-        # Initialisation du plateau : chaque trou contient [2 graines rouges, 2 graines bleues]
-        # board[i] = [nb_graines_rouges, nb_graines_bleues]
+    def __init__(self, player1_is_human=True, player2_is_human=True):
+        # Initial board: each hole has [2 red, 2 blue]
         self.board = [[2, 2] for _ in range(16)]
-
-        # Scores des deux joueurs (joueur 1, joueur 2)
+        # Scores for players [player1_score, player2_score]
         self.scores = [0, 0]
-
-        # Joueur 1 contrôle les trous d'index pair (0,2,4,...)
-        # Joueur 2 contrôle les trous d'index impair (1,3,5,...)
+        # Player 1 controls even indices (0,2,4,...), Player 2 controls odd indices (1,3,5,...)
         self.player_holes = {
-            1: [i for i in range(0, 16, 2)],  # Index pairs pour Joueur 1
-            2: [i for i in range(1, 16, 2)]   # Index impairs pour Joueur 2
+            1: [i for i in range(0, 16, 2)],
+            2: [i for i in range(1, 16, 2)]
         }
-
-        # Joueur courant (1 ou 2)
         self.current_player = 1
 
+        # Set whether each player is human or AI
+        self.player1_is_human = player1_is_human
+        self.player2_is_human = player2_is_human
+
     def display_board(self):
-        """Affiche le plateau sous forme de deux lignes de 8 trous avec numérotation (1-based)."""
+        """Display the board in a simple linear fashion."""
         print("\nPlateau (dans l'ordre horaire) :")
-
-        # Ligne supérieure (trous 1 à 8)
+        # Print hole numbers
         print(" " + "     ".join(f"{i+1:2}" for i in range(16)))
+        # Print seeds in holes
         print(" " + " ".join(f"{hole}" for hole in self.board))
-
-        # Afficher les scores
+        # Print scores
         print(f"\nScores: Joueur 1 = {self.scores[0]}, Joueur 2 = {self.scores[1]}")
 
     def is_valid_move(self, hole, color):
-        """Vérifie si un mouvement est valide pour le joueur actuel."""
-        # Le trou doit appartenir au joueur courant
+        """Check if a move is valid for the current player."""
         if hole not in self.player_holes[self.current_player]:
             return False
-        # La couleur doit être 0 (rouge) ou 1 (bleu)
         if color not in [0, 1]:
             return False
-        # Il doit y avoir au moins une graine de la couleur choisie
         if self.board[hole][color] == 0:
             return False
         return True
 
     def play_move(self, hole, color):
-        """Effectue un mouvement : prend les graines de la couleur spécifiée dans le trou donné,
-        les sème selon les règles, puis applique la capture."""
+        """Execute the given move (hole, color) on the board."""
         if not self.is_valid_move(hole, color):
             raise ValueError("Mouvement invalide !")
 
         seeds_to_sow = self.board[hole][color]
-        self.board[hole][color] = 0  # On retire les graines du trou de départ
+        self.board[hole][color] = 0
 
         initial_hole = hole
         current_index = hole
 
         # Distribution des graines
-        # Règles :
-        # - Bleu (color=1) : sème dans tous les trous sauf le trou de départ.
-        # - Rouge (color=0) : sème uniquement dans les trous de l'adversaire, en excluant le trou de départ.
+        # Bleu (color=1) : sème dans tous les trous sauf le trou de départ.
+        # Rouge (color=0) : sème uniquement dans les trous adverses, en excluant le trou de départ.
         while seeds_to_sow > 0:
             current_index = (current_index + 1) % 16
 
@@ -68,27 +62,25 @@ class AwaleGame:
                 # Sème seulement dans les trous adverses
                 if current_index in self.player_holes[self.current_player]:
                     continue
-                # Trou valide pour semer des graines rouges
                 self.board[current_index][color] += 1
                 seeds_to_sow -= 1
             else:  # Bleu
-                # Sème dans tous les trous sauf le trou de départ (déjà exclu)
+                # Sème dans tous les trous sauf le trou de départ
                 self.board[current_index][color] += 1
                 seeds_to_sow -= 1
 
-        # Appliquer les captures à partir du dernier trou semé
+        # Appliquer les captures
         self.apply_capture(current_index)
 
         # Changer de joueur
-        self.current_player = 3 - self.current_player  # Passe de 1 à 2 ou de 2 à 1
+        self.current_player = 3 - self.current_player
 
     def apply_capture(self, start_hole):
-        """Applique les règles de capture en remontant en arrière à partir du trou start_hole."""
+        """Apply capture rules starting from start_hole and going backward."""
         current_index = start_hole
         while True:
             total_seeds = sum(self.board[current_index])
             if total_seeds in [2, 3]:
-                # Capturer les graines de ce trou
                 self.scores[self.current_player - 1] += total_seeds
                 self.board[current_index] = [0, 0]
                 current_index = (current_index - 1) % 16
@@ -96,50 +88,126 @@ class AwaleGame:
                 break
 
     def game_over(self):
-        """Vérifie si la partie est terminée selon les règles."""
+        """Check if the game is over according to the rules."""
         total_seeds = sum(sum(hole) for hole in self.board)
-        # Si moins de 8 graines sur le plateau, la partie s'arrête
         if total_seeds < 8:
             return True
-        # Si un joueur a 33 graines ou plus, la partie s'arrête
         if self.scores[0] >= 33 or self.scores[1] >= 33:
             return True
-        # Si c'est un match nul à 32 graines chacun
         if self.scores[0] == 32 and self.scores[1] == 32:
             return True
         return False
 
     def get_winner(self):
-        """Détermine le gagnant ou s'il y a égalité."""
-        # Si égalité parfaite (32-32), on retourne "Égalité"
-        if self.scores[0] == 32 and self.scores[1] == 32:
-            return "Égalité"
-
-        # Dans les autres cas, celui qui a le plus de graines l'emporte
+        """Determine the winner or if it's a draw."""
         if self.scores[0] > self.scores[1]:
             return "Joueur 1"
         elif self.scores[1] > self.scores[0]:
             return "Joueur 2"
         else:
-            # Si on arrive ici (et qu'on a moins de 8 graines sur le plateau),
-            # on compare les scores. S'ils sont égaux, c'est une égalité.
             return "Égalité"
 
+    def clone(self):
+        """Create a copy of the current game state."""
+        new_game = AwaleGame(self.player1_is_human, self.player2_is_human)
+        new_game.board = [h[:] for h in self.board]
+        new_game.scores = self.scores[:]
+        new_game.current_player = self.current_player
+        return new_game
+
+    def get_valid_moves(self):
+        """Return a list of all valid moves (hole, color) for the current player."""
+        moves = []
+        for hole in self.player_holes[self.current_player]:
+            for color in [0, 1]:
+                if self.is_valid_move(hole, color):
+                    moves.append((hole, color))
+        return moves
+
+    def evaluate(self):
+        """Basic evaluation function: difference in scores from the perspective of the current player."""
+        # A more sophisticated heuristic could be implemented here.
+        if self.current_player == 1:
+            return self.scores[0] - self.scores[1]
+        else:
+            return self.scores[1] - self.scores[0]
+
+    def minimax(self, depth, alpha, beta, maximizing_player):
+        """Minimax with alpha-beta pruning."""
+        if self.game_over() or depth == 0:
+            return self.evaluate(), None
+
+        moves = self.get_valid_moves()
+        if not moves:
+            # No moves available
+            return self.evaluate(), None
+
+        best_move = None
+
+        if maximizing_player:
+            max_eval = -math.inf
+            for move in moves:
+                clone_state = self.clone()
+                clone_state.play_move(move[0], move[1])
+                eval_val, _ = clone_state.minimax(depth - 1, alpha, beta, False)
+                if eval_val > max_eval:
+                    max_eval = eval_val
+                    best_move = move
+                alpha = max(alpha, eval_val)
+                if beta <= alpha:
+                    break
+            return max_eval, best_move
+        else:
+            min_eval = math.inf
+            for move in moves:
+                clone_state = self.clone()
+                clone_state.play_move(move[0], move[1])
+                eval_val, _ = clone_state.minimax(depth - 1, alpha, beta, True)
+                if eval_val < min_eval:
+                    min_eval = eval_val
+                    best_move = move
+                beta = min(beta, eval_val)
+                if beta <= alpha:
+                    break
+            return min_eval, best_move
+
+    def best_move(self, depth=4):
+        """Find the best move using Minimax + Alpha-Beta pruning."""
+        _, move = self.minimax(depth, -math.inf, math.inf, True)
+        return move
 
 
 if __name__ == "__main__":
-    game = AwaleGame()
+    # Example: Player 1 is human, Player 2 is AI
+    # Change these booleans as desired:
+    player1_is_human = True
+    player2_is_human = False
+
+    game = AwaleGame(player1_is_human=player1_is_human, player2_is_human=player2_is_human)
     game.display_board()
 
     while not game.game_over():
         print(f"\nTour du Joueur {game.current_player}")
-        hole = int(input("Choisissez un trou (1-16) : ")) - 1
-        color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
-        try:
-            game.play_move(hole, color)
-        except ValueError as e:
-            print(e)
-            continue
+
+        if (game.current_player == 1 and game.player1_is_human) or (game.current_player == 2 and game.player2_is_human):
+            # Human player
+            hole = int(input("Choisissez un trou (1-16) : ")) - 1
+            color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
+            try:
+                game.play_move(hole, color)
+            except ValueError as e:
+                print(e)
+                continue
+        else:
+            # AI player
+            # We call best_move to find the best move for the current AI player
+            move = game.best_move(depth=4)
+            if move is None:
+                # No moves available, should end the game
+                break
+            print(f"L'IA (Joueur {game.current_player}) joue le trou {move[0]+1}, couleur {'Rouge' if move[1]==0 else 'Bleu'}.")
+            game.play_move(move[0], move[1])
+
         game.display_board()
 
     print(f"\nPartie terminée ! Le gagnant est : {game.get_winner()}")
