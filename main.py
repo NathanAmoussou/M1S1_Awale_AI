@@ -1,6 +1,9 @@
 import math
 import time
 import random
+import sys
+from collections import defaultdict
+import hashlib
 
 class AwaleGame:
     def __init__(self, player1_type="human", player2_type="human"):
@@ -17,7 +20,7 @@ class AwaleGame:
         # Scores : [score_joueur1, score_joueur2]
         self.scores = [0, 0]
 
-        # Joueur 1 contrôle les indices pairs (0,2,4,...), Joueur 2 les indices impairs (1,3,5,...)
+        # Joueur 1 contrôle les indices pairs (0,2,4,...), Joueur 2 contrôle les indices impairs (1,3,5,...)
         self.player_holes = {
             1: [i for i in range(0, 16, 2)],
             2: [i for i in range(1, 16, 2)]
@@ -31,6 +34,15 @@ class AwaleGame:
             1: player1_type,
             2: player2_type
         }
+
+        # ----- Killer moves -----
+        # On stocke 2 killer moves par profondeur (supposons profondeur max ~64)
+        self.killer_moves = [[None, None] for _ in range(64)]
+
+        # ----- Transposition Table -----
+        # Dictionnaire : clé = hash d'état, valeur = (depth, score, nodeType, bestMove)
+        # nodeType ∈ {"EXACT", "LOWER", "UPPER"}
+        self.transpo_table = {}
 
     # ------------------------------------------------------------------
     # Affichage
@@ -47,13 +59,10 @@ class AwaleGame:
     # ------------------------------------------------------------------
     def is_valid_move(self, hole, color):
         """Vérifie si (hole, color) est un mouvement valide pour le joueur courant."""
-        # hole doit être dans les trous contrôlés par current_player
         if hole not in self.player_holes[self.current_player]:
             return False
-        # color doit être 0 (rouge) ou 1 (bleu)
         if color not in [0, 1]:
             return False
-        # Le trou doit contenir au moins 1 graine de la couleur choisie
         if self.board[hole][color] == 0:
             return False
         return True
@@ -69,41 +78,31 @@ class AwaleGame:
         initial_hole = hole
         current_index = hole
 
-        # Distribution des graines selon les règles
+        # Distribution des graines
         while seeds_to_sow > 0:
             current_index = (current_index + 1) % 16
-
-            # Ne pas semer dans le trou de départ
             if current_index == initial_hole:
                 continue
 
-            if color == 0:  # Rouge
-                # Semer seulement dans les trous adverses
+            if color == 0:  # Rouge => semer seulement dans les trous adverses
                 if current_index in self.player_holes[self.current_player]:
                     continue
-                self.board[current_index][color] += 1
+                self.board[current_index][0] += 1
                 seeds_to_sow -= 1
-            else:  # Bleu
-                # Semer dans tous les trous sauf le départ
-                self.board[current_index][color] += 1
+            else:  # Bleu => semer partout sauf trou de départ
+                self.board[current_index][1] += 1
                 seeds_to_sow -= 1
 
-        # Application de la capture
         self.apply_capture(current_index)
-
         # Changement de joueur
         self.current_player = 3 - self.current_player
 
     def apply_capture(self, start_hole):
-        """
-        Applique la capture en rafale en remontant tant que le trou précédent
-        a un total de 2 ou 3 graines.
-        """
+        """Applique la capture en remontant tant que trou = 2 ou 3 graines."""
         current_index = start_hole
         while True:
             total_seeds = sum(self.board[current_index])
             if total_seeds in [2, 3]:
-                # Le joueur qui vient de jouer capture
                 self.scores[self.current_player - 1] += total_seeds
                 self.board[current_index] = [0, 0]
                 current_index = (current_index - 1) % 16
@@ -116,9 +115,9 @@ class AwaleGame:
     def game_over(self):
         """
         La partie se termine si :
-        - Il reste moins de 8 graines sur le plateau.
-        - Un des joueurs a >= 33 points.
-        - Les deux joueurs ont 32 points chacun (égalité).
+        - Il reste moins de 8 graines sur le plateau,
+        - Un des joueurs a >= 33 points,
+        - Les deux joueurs ont 32 points chacun.
         """
         total_seeds = sum(sum(hole) for hole in self.board)
         if total_seeds < 8:
@@ -139,21 +138,21 @@ class AwaleGame:
             return "Égalité"
 
     # ------------------------------------------------------------------
-    # IA et évaluation
+    # Clone, moves, hashing
     # ------------------------------------------------------------------
     def clone(self):
-        """Retourne une copie indépendante de l'état de la partie."""
         new_game = AwaleGame(
             player1_type=self.player_types[1],
             player2_type=self.player_types[2]
         )
-        new_game.board = [h[:] for h in self.board]
+        new_game.board = [row[:] for row in self.board]
         new_game.scores = self.scores[:]
         new_game.current_player = self.current_player
+        # killer_moves et TT ne sont pas copiés dans le clone
         return new_game
 
     def get_valid_moves(self):
-        """Liste tous les coups possibles (hole, color) pour le joueur courant."""
+        """Liste (hole, color) valides pour le joueur courant."""
         moves = []
         for hole in self.player_holes[self.current_player]:
             for color in [0, 1]:
@@ -161,77 +160,234 @@ class AwaleGame:
                     moves.append((hole, color))
         return moves
 
+    def compute_hash(self):
+        """
+        Calcule un hash (ex : MD5) rapide de l'état.
+        Pour un hashing plus robuste, on peut faire du Zobrist.
+        """
+        # Concaténer board + scores + current_player
+        data = []
+        data.append(str(self.current_player))
+        data.append(str(self.scores[0]))
+        data.append(str(self.scores[1]))
+        for i in range(16):
+            data.append(str(self.board[i][0]))
+            data.append(str(self.board[i][1]))
+        big_str = "_".join(data)
+        return hashlib.md5(big_str.encode()).hexdigest()
+
+    # ------------------------------------------------------------------
+    # Heuristique plus riche
+    # ------------------------------------------------------------------
     def evaluate(self):
         """
-        Fonction d'évaluation basique: différence de score
-        vue du joueur courant.
+        Heuristique améliorée :
+        1) Différentiel de score (x10 pour l'accentuer),
+        2) Bonus/malus en fonction de l'opportunité de capture imminente,
+        etc.
         """
         if self.current_player == 1:
-            return self.scores[0] - self.scores[1]
+            base = self.scores[0] - self.scores[1]
         else:
-            return self.scores[1] - self.scores[0]
+            base = self.scores[1] - self.scores[0]
 
+        base *= 10
+
+        # Bonus : compter le nb de trous adverses = 1 ou 2 graines
+        adv = 3 - self.current_player
+        bonus = 0
+        for hole in self.player_holes[adv]:
+            s = sum(self.board[hole])
+            if s in [1, 2]:
+                bonus += 2
+
+        return base + bonus
+
+    # ------------------------------------------------------------------
+    # Move Ordering
+    # ------------------------------------------------------------------
+    def order_moves(self, moves):
+        """
+        Évalue rapidement l'impact (ex: captures) de chaque move et trie
+        (du plus prometteur au moins prometteur).
+        """
+        scored = []
+        for m in moves:
+            # One-step évaluation
+            clone_state = self.clone()
+            clone_state.play_move(m[0], m[1])
+            if self.current_player == 1:
+                delta = clone_state.scores[0] - self.scores[0]
+            else:
+                delta = clone_state.scores[1] - self.scores[1]
+            scored.append((delta, m))
+
+        # Tri décroissant
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        ordered = [x[1] for x in scored]
+        return ordered
+
+    # ------------------------------------------------------------------
+    # Killer moves
+    # ------------------------------------------------------------------
+    def try_killer_moves(self, moves, depth):
+        """
+        Replace en tête de liste les killer moves si présents.
+        On stocke 2 killer moves par profondeur.
+        """
+        if depth >= len(self.killer_moves):
+            return moves  # Sécurité si la profondeur dépasse
+
+        # Récupère les 2 killer moves potentiels
+        km1, km2 = self.killer_moves[depth]
+
+        # Transforme en liste pour manip plus facile
+        moves_list = list(moves)
+
+        for km in [km1, km2]:
+            if km and km in moves_list:
+                idx = moves_list.index(km)
+                # Met en tête
+                moves_list.insert(0, moves_list.pop(idx))
+        return moves_list
+
+    def add_killer_move(self, depth, move):
+        """Insère 'move' en tête, décale l'autre."""
+        if depth >= len(self.killer_moves):
+            return
+        km1, km2 = self.killer_moves[depth]
+        if km1 != move:
+            # Décale
+            self.killer_moves[depth][1] = km1
+            self.killer_moves[depth][0] = move
+
+    # ------------------------------------------------------------------
+    # Transposition Table
+    # ------------------------------------------------------------------
+    # On stocke : depth, score, nodeType ∈ {EXACT, LOWER, UPPER}, bestMove
+    # nodeType nous permet de mettre à jour alpha/beta
+    # ------------------------------------------------------------------
+    def lookup_tt(self, state_hash, depth, alpha, beta):
+        """
+        Vérifie si on a une entrée TT. Renvoie (score, bestMove, alpha, beta, found).
+        found = True si on a trouvé une TT valide
+        """
+        entry = self.transpo_table.get(state_hash, None)
+        if entry is None:
+            return None, None, alpha, beta, False
+
+        stored_depth, stored_score, node_type, stored_best = entry
+        if stored_depth >= depth:
+            # On peut s'en servir
+            if node_type == "EXACT":
+                return stored_score, stored_best, alpha, beta, True
+            elif node_type == "LOWER":
+                if stored_score > alpha:
+                    alpha = stored_score
+            elif node_type == "UPPER":
+                if stored_score < beta:
+                    beta = stored_score
+            if alpha >= beta:
+                # cutoff
+                return stored_score, stored_best, alpha, beta, True
+
+        return None, None, alpha, beta, False
+
+    def store_tt(self, state_hash, depth, score, node_type, best_move):
+        self.transpo_table[state_hash] = (depth, score, node_type, best_move)
+
+    # ------------------------------------------------------------------
+    # Minimax avec TT, killer moves, move ordering
+    # ------------------------------------------------------------------
     def minimax(self, depth, alpha, beta, maximizing_player, start_time, max_time):
-        """
-        Minimax (avec coupure alpha-beta) et coupure temporelle.
-        - depth: profondeur de recherche restante
-        - alpha, beta: bornes de coupe
-        - maximizing_player: True si on cherche à maximiser, False si on minimise
-        - start_time, max_time: pour la coupure de temps
-        """
-        # Vérification du temps
+        # 1) Vérification du temps
         if time.time() - start_time >= max_time:
             return self.evaluate(), None
 
+        # 2) Condition d'arrêt
         if self.game_over() or depth == 0:
             return self.evaluate(), None
 
+        # 3) TT check
+        state_hash = self.compute_hash()
+        stored_score, stored_move, alpha, beta, found = self.lookup_tt(state_hash, depth, alpha, beta)
+        if found and stored_move is not None:
+            # On peut renvoyer directement
+            return stored_score, stored_move
+
+        # 4) Générer + trier les moves
         moves = self.get_valid_moves()
         if not moves:
             return self.evaluate(), None
 
+        moves = self.order_moves(moves)
+        # On insère d'abord les killer moves
+        moves = self.try_killer_moves(moves, depth)
+
         best_move = None
 
         if maximizing_player:
-            max_eval = -math.inf
-            for move in moves:
+            best_score = -math.inf
+            node_type = "EXACT"
+            for mv in moves:
                 if time.time() - start_time >= max_time:
                     break
 
                 clone_state = self.clone()
-                clone_state.play_move(*move)
-                eval_val, _ = clone_state.minimax(
-                    depth - 1, alpha, beta,
-                    False,  # on passe au joueur minimisant
+                clone_state.play_move(mv[0], mv[1])
+                child_score, _ = clone_state.minimax(
+                    depth - 1, alpha, beta, False,
                     start_time, max_time
                 )
-                if eval_val > max_eval:
-                    max_eval = eval_val
-                    best_move = move
-                alpha = max(alpha, eval_val)
+                if child_score > best_score:
+                    best_score = child_score
+                    best_move = mv
+                alpha = max(alpha, best_score)
                 if beta <= alpha:
+                    # cutoff => killer move
+                    self.add_killer_move(depth, mv)
+                    node_type = "LOWER"
                     break
-            return max_eval, best_move
+
+            # Stocker dans TT
+            if best_score <= alpha:
+                node_type = "UPPER"
+            elif best_score >= beta:
+                node_type = "LOWER"
+
+            self.store_tt(state_hash, depth, best_score, node_type, best_move)
+            return best_score, best_move
+
         else:
-            min_eval = math.inf
-            for move in moves:
+            best_score = math.inf
+            node_type = "EXACT"
+            for mv in moves:
                 if time.time() - start_time >= max_time:
                     break
 
                 clone_state = self.clone()
-                clone_state.play_move(*move)
-                eval_val, _ = clone_state.minimax(
-                    depth - 1, alpha, beta,
-                    True,  # on passe au joueur maximisant
+                clone_state.play_move(mv[0], mv[1])
+                child_score, _ = clone_state.minimax(
+                    depth - 1, alpha, beta, True,
                     start_time, max_time
                 )
-                if eval_val < min_eval:
-                    min_eval = eval_val
-                    best_move = move
-                beta = min(beta, eval_val)
+                if child_score < best_score:
+                    best_score = child_score
+                    best_move = mv
+                beta = min(beta, best_score)
                 if beta <= alpha:
+                    self.add_killer_move(depth, mv)
+                    node_type = "UPPER"
                     break
-            return min_eval, best_move
+
+            if best_score <= alpha:
+                node_type = "UPPER"
+            elif best_score >= beta:
+                node_type = "LOWER"
+
+            self.store_tt(state_hash, depth, best_score, node_type, best_move)
+            return best_score, best_move
 
     def best_move_minimax(self, max_time=2):
         """
@@ -245,18 +401,16 @@ class AwaleGame:
             elapsed_time = time.time() - start_time
             if elapsed_time >= max_time:
                 break
-
             try:
                 eval_val, move = self.minimax(
                     depth, -math.inf, math.inf,
-                    True,  # Le joueur courant est supposé maximiser
+                    True,  # maximizing
                     start_time, max_time
                 )
                 if move is not None:
                     best_move_found = move
             except Exception:
                 break
-
             depth += 1
 
         total_time = time.time() - start_time
@@ -264,7 +418,7 @@ class AwaleGame:
         return best_move_found
 
     def best_move_random(self):
-        """Retourne un coup au hasard parmi les coups valides."""
+        """Retourne un coup au hasard parmi les coups possibles."""
         valid_moves = self.get_valid_moves()
         if not valid_moves:
             return None
@@ -283,7 +437,6 @@ class AwaleGame:
         ptype = self.player_types[self.current_player]
 
         if ptype == "human":
-            # On demande à l'utilisateur un trou et une couleur
             hole = int(input("Choisissez un trou (1-16) : ")) - 1
             color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
             return hole, color
@@ -292,24 +445,17 @@ class AwaleGame:
             return self.best_move_random()
 
         elif ptype == "ai_minimax":
-            return self.best_move_minimax(max_time=10)
+            # On peut mettre max_time plus haut pour plus de profondeur
+            return self.best_move_minimax(max_time=2.0)
 
         else:
-            # Par défaut, on ne sait pas -> aucun coup
             return None
 
 
 if __name__ == "__main__":
-    # -------------------------------------------------------------
-    # EXEMPLE D'UTILISATION
-    # -------------------------------------------------------------
-    #
-    # Paramètres possibles pour chaque joueur:
-    #   "human", "ai_minimax", ou "ai_random"
-    #
-    # Exemple : Joueur 1 = Minimax, Joueur 2 = Random
-    player2_type = "ai_minimax"
+    # Exemple : J1 = ai_minimax, J2 = ai_random ou J2 = human
     player1_type = "ai_random"
+    player2_type = "ai_minimax"
 
     game = AwaleGame(player1_type=player1_type, player2_type=player2_type)
 
@@ -321,20 +467,14 @@ if __name__ == "__main__":
         print(f"\nTour n°{turn_counter}, Joueur {game.current_player}")
 
         move = game.get_move_for_current_player()
-
-        # Si c'est un coup humain invalide, on retente
         if move is None:
-            # Aucun coup possible (ou pas de coup renvoyé) => partie finie
             break
 
-        # Le move vient soit de l'humain, soit de l'IA
-        # Vérifions qu'il est valide
         hole, color = move
         try:
             game.play_move(hole, color)
         except ValueError as e:
             print(e)
-            # On ne change pas de joueur si move invalide => annuler l'incrément
             turn_counter -= 1
             continue
 
