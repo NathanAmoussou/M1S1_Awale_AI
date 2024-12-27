@@ -169,8 +169,8 @@ class AwaleGame:
         self.board = [[2, 2] for _ in range(16)]
         self.scores = [0, 0]
         self.player_holes = {
-            1: [i for i in range(0, 16, 2)],
-            2: [i for i in range(1, 16, 2)]
+            1: [i for i in range(1, 16, 2)],
+            2: [i for i in range(0, 16, 2)]
         }
         self.current_player = 1
         self.player_types = {
@@ -185,6 +185,8 @@ class AwaleGame:
         print(f"\nScores: Joueur 1 = {self.scores[0]}, Joueur 2 = {self.scores[1]}")
 
     def is_valid_move(self, hole, color):
+        if hole is None or color is None:
+            return False
         if hole not in self.player_holes[self.current_player]:
             return False
         if color not in [0, 1]:
@@ -192,6 +194,14 @@ class AwaleGame:
         if self.board[hole][color] == 0:
             return False
         return True
+
+    def get_valid_moves(self):
+        moves = []
+        for hole in self.player_holes[self.current_player]:
+            for color in [0, 1]:
+                if self.board[hole][color] > 0:
+                    moves.append((hole, color))
+        return moves
 
     def play_move(self, hole, color):
         if not self.is_valid_move(hole, color):
@@ -312,7 +322,7 @@ class AwaleGame:
 
 if __name__ == "__main__":
     player1_type = "ai_minimax"
-    player2_type = "human"
+    player2_type = "ai_random"
 
     game = AwaleGame(player1_type=player1_type, player2_type=player2_type)
     game.run_game()
