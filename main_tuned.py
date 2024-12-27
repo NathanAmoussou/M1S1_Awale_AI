@@ -1,8 +1,6 @@
 import math
 import time
 import random
-import sys
-from collections import defaultdict
 import hashlib
 
 class AwaleGame:
@@ -452,32 +450,31 @@ class AwaleGame:
             return None
 
 
-if __name__ == "__main__":
-    # Exemple : J1 = ai_minimax, J2 = ai_random ou J2 = human
-    player1_type = "ai_random"
-    player2_type = "ai_minimax"
+# Exemple : J1 = ai_minimax, J2 = ai_random ou J2 = human
+player1_type = "ai_minimax"
+player2_type = "ai_minimax"
 
-    game = AwaleGame(player1_type=player1_type, player2_type=player2_type)
+game = AwaleGame(player1_type=player1_type, player2_type=player2_type)
 
-    turn_counter = 0
+turn_counter = 0
+game.display_board()
+
+while not game.game_over():
+    turn_counter += 1
+    print(f"\nTour n°{turn_counter}, Joueur {game.current_player}")
+
+    move = game.get_move_for_current_player()
+    if move is None:
+        break
+
+    hole, color = move
+    try:
+        game.play_move(hole, color)
+    except ValueError as e:
+        print(e)
+        turn_counter -= 1
+        continue
+
     game.display_board()
 
-    while not game.game_over():
-        turn_counter += 1
-        print(f"\nTour n°{turn_counter}, Joueur {game.current_player}")
-
-        move = game.get_move_for_current_player()
-        if move is None:
-            break
-
-        hole, color = move
-        try:
-            game.play_move(hole, color)
-        except ValueError as e:
-            print(e)
-            turn_counter -= 1
-            continue
-
-        game.display_board()
-
-    print(f"\nPartie terminée en {turn_counter} tours ! Le gagnant est : {game.get_winner()}")
+print(f"\nPartie terminée en {turn_counter} tours ! Le gagnant est : {game.get_winner()}")
