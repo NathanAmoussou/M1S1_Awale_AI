@@ -56,8 +56,8 @@ def get_valid_moves_batch(state_tensor: torch.Tensor, current_player: int) -> Li
     moves: List[Tuple[int, int]] = []
 
     # Define player-controlled holes
-    player_1_holes = [1, 3, 5, 7, 9, 11, 13, 15]  # Odd holes for Player 1
-    player_2_holes = [0, 2, 4, 6, 8, 10, 12, 14]  # Even holes for Player 2
+    player_1_holes = [0, 2, 4, 6, 8, 10, 12, 14]  # Odd holes for Player 1
+    player_2_holes = [1, 3, 5, 7, 9, 11, 13, 15]  # Even holes for Player 2
 
     # Select the appropriate holes based on the current player
     controlled_holes = player_1_holes if current_player == 1 else player_2_holes
@@ -86,6 +86,8 @@ def make_move_batch(state_tensor: torch.Tensor, move: Tuple[int, int], player: i
                 seeds -= 1
     return new_states
 
+razzoring = 0
+
 @torch.jit.script
 def parallel_minimax_step(
     state_tensor: torch.Tensor,
@@ -95,6 +97,7 @@ def parallel_minimax_step(
     beta: torch.Tensor,
     maximizing_player: bool
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    global razzoring
     batch_size = state_tensor.size(0)
     device = state_tensor.device
 
@@ -124,6 +127,7 @@ def parallel_minimax_step(
             value = torch.min(value, child_value)
             beta = torch.min(beta, value)
             if torch.any(beta <= alpha):
+                razzoring += 1
                 break
 
     return value, alpha, beta
@@ -169,8 +173,8 @@ class AwaleGame:
         self.board = [[2, 2] for _ in range(16)]
         self.scores = [0, 0]
         self.player_holes = {
-            1: [i for i in range(1, 16, 2)],
-            2: [i for i in range(0, 16, 2)]
+            1: [i for i in range(0, 16, 2)],
+            2: [i for i in range(1, 16, 2)]
         }
         self.current_player = 1
         self.player_types = {
@@ -319,9 +323,10 @@ class AwaleGame:
             self.display_board()
 
         print(f"\nPartie terminée en {turn_counter} tours ! Le gagnant est : {self.get_winner()}")
+        print(razzoring)
 
 if __name__ == "__main__":
-    player1_type = "ai_minimax"
+    player1_type = "human"
     player2_type = "ai_random"
 
     game = AwaleGame(player1_type=player1_type, player2_type=player2_type)
