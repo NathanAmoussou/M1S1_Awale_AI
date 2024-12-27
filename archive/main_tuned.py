@@ -451,7 +451,7 @@ class AwaleGame:
 
 
 # Exemple : J1 = ai_minimax, J2 = ai_random ou J2 = human
-player1_type = "ai_minimax"
+player1_type = "human"
 player2_type = "ai_minimax"
 
 game = AwaleGame(player1_type=player1_type, player2_type=player2_type)

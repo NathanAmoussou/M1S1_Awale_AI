@@ -51,22 +51,16 @@ def evaluate_batch(state_tensor: torch.Tensor, scores_tensor: torch.Tensor, curr
     batch_size = state_tensor.size(0)
     device = state_tensor.device
 
-    # Base score difference (multiplied by 10 as in the original)
     if current_player == 1:
         base_score = (scores_tensor[:, 0] - scores_tensor[:, 1]) * 10
     else:
         base_score = (scores_tensor[:, 1] - scores_tensor[:, 0]) * 10
 
-    # Calculate bonus for opponent's vulnerable holes (containing 1 or 2 seeds)
     bonus = torch.zeros(batch_size, device=device)
-
-    # Define opponent's holes
     opponent_holes = [1, 3, 5, 7, 9, 11, 13, 15] if current_player == 1 else [0, 2, 4, 6, 8, 10, 12, 14]
 
     for hole in opponent_holes:
-        # Sum seeds in each hole
         hole_sum = state_tensor[:, hole, 0] + state_tensor[:, hole, 1]
-        # Add bonus for holes with 1 or 2 seeds
         vulnerable = ((hole_sum == 1) | (hole_sum == 2)).float() * 2
         bonus += vulnerable
 
@@ -84,23 +78,18 @@ def order_moves_batch(
     move_scores = torch.zeros(len(moves), device=device)
 
     for i, move in enumerate(moves):
-        # Simulate each move
         new_states = make_move_batch(state_tensor, move, current_player)
         new_scores = scores_tensor.clone()
 
-        # Calculate immediate score gain
-        hole, color = move
         if current_player == 1:
             score_gain = new_scores[:, 0] - scores_tensor[:, 0]
         else:
             score_gain = new_scores[:, 1] - scores_tensor[:, 1]
 
-        # Use mean score across batch for sorting
         move_scores[i] = torch.mean(score_gain)
 
-    # Sort moves by scores
     sorted_indices = torch.argsort(move_scores, descending=True)
-    indices_list: List[int] = sorted_indices.tolist()  # Explicit type hint
+    indices_list: List[int] = sorted_indices.tolist()
     return [moves[i] for i in indices_list]
 
 @torch.jit.script
@@ -139,69 +128,52 @@ def make_move_batch(state_tensor: torch.Tensor, move: Tuple[int, int], player: i
     return new_states
 
 @torch.jit.script
-def parallel_minimax_step(
+def parallel_minimax_layer(
     state_tensor: torch.Tensor,
     scores_tensor: torch.Tensor,
     depth: int,
-    alpha: torch.Tensor,
-    beta: torch.Tensor,
     maximizing_player: bool
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     batch_size = state_tensor.size(0)
     device = state_tensor.device
 
     if depth == 0:
-        eval_scores = evaluate_batch(state_tensor, scores_tensor, 1 if maximizing_player else 2)
-        return eval_scores, alpha, beta
+        return evaluate_batch(state_tensor, scores_tensor, 1 if maximizing_player else 2)
 
     valid_moves = get_valid_moves_batch(state_tensor, 1 if maximizing_player else 2)
     if len(valid_moves) == 0:
-        eval_scores = evaluate_batch(state_tensor, scores_tensor, 1 if maximizing_player else 2)
-        return eval_scores, alpha, beta
+        return evaluate_batch(state_tensor, scores_tensor, 1 if maximizing_player else 2)
 
-    # Order moves before processing
     ordered_moves = order_moves_batch(state_tensor, scores_tensor, valid_moves, 1 if maximizing_player else 2)
 
     if maximizing_player:
         value = torch.full((batch_size,), float('-inf'), device=device)
         for move in ordered_moves:
             new_states = make_move_batch(state_tensor, move, 1)
-            child_value, new_alpha, new_beta = parallel_minimax_step(
-                new_states, scores_tensor, depth - 1, alpha, beta, False
-            )
-            value = torch.max(value, child_value)
-            alpha = torch.max(alpha, value)
-            if torch.any(beta <= alpha):
-                break
+            move_value = evaluate_batch(new_states, scores_tensor, 2)  # Evaluate from opponent's perspective
+            value = torch.max(value, move_value)
     else:
         value = torch.full((batch_size,), float('inf'), device=device)
         for move in ordered_moves:
             new_states = make_move_batch(state_tensor, move, 2)
-            child_value, new_alpha, new_beta = parallel_minimax_step(
-                new_states, scores_tensor, depth - 1, alpha, beta, True
-            )
-            value = torch.min(value, child_value)
-            beta = torch.min(beta, value)
-            if torch.any(beta <= alpha):
-                break
+            move_value = evaluate_batch(new_states, scores_tensor, 1)  # Evaluate from opponent's perspective
+            value = torch.min(value, move_value)
 
-    return value, alpha, beta
+    return value
 
 @torch.jit.script
 def parallel_minimax(state_tensor: torch.Tensor, scores_tensor: torch.Tensor, max_depth: int) -> torch.Tensor:
     batch_size = state_tensor.size(0)
     device = state_tensor.device
 
-    alpha = torch.full((batch_size,), float('-inf'), device=device)
-    beta = torch.full((batch_size,), float('inf'), device=device)
+    best_value = torch.zeros(batch_size, device=device)
 
-    value = torch.zeros((batch_size,), device=device)
+    # Evaluate each depth level iteratively
     for depth in range(max_depth):
-        value, alpha, beta = parallel_minimax_step(
-            state_tensor, scores_tensor, depth, alpha, beta, True
-        )
+        value = parallel_minimax_layer(state_tensor, scores_tensor, depth, True)
+        best_value = torch.max(best_value, value)
 
-    return value
+    return best_value
 
 def benchmark_awale(num_games: int = 100, max_depth: int = 4):
     print(f"Benchmarking Awale with {num_games} games at depth {max_depth}")
@@ -378,10 +350,9 @@ class AwaleGame:
             self.display_board()
 
         print(f"\nPartie terminée en {turn_counter} tours ! Le gagnant est : {self.get_winner()}")
-        print(razzoring)
 
 if __name__ == "__main__":
-    player1_type = "human"
+    player1_type = "ai_minimax"
     player2_type = "ai_random"
 
     game = AwaleGame(player1_type=player1_type, player2_type=player2_type)

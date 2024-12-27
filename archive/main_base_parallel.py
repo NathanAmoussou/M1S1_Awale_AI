@@ -86,8 +86,6 @@ def make_move_batch(state_tensor: torch.Tensor, move: Tuple[int, int], player: i
                 seeds -= 1
     return new_states
 
-razzoring = 0
-
 @torch.jit.script
 def parallel_minimax_step(
     state_tensor: torch.Tensor,
@@ -97,7 +95,6 @@ def parallel_minimax_step(
     beta: torch.Tensor,
     maximizing_player: bool
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    global razzoring
     batch_size = state_tensor.size(0)
     device = state_tensor.device
 
@@ -127,7 +124,6 @@ def parallel_minimax_step(
             value = torch.min(value, child_value)
             beta = torch.min(beta, value)
             if torch.any(beta <= alpha):
-                razzoring += 1
                 break
 
     return value, alpha, beta
@@ -182,11 +178,62 @@ class AwaleGame:
             2: player2_type
         }
 
-    def display_board(self):
-        print("\nPlateau (dans l'ordre horaire) :")
-        print(" " + "     ".join(f"{i+1:2}" for i in range(16)))
-        print(" " + " ".join(f"{hole}" for hole in self.board))
-        print(f"\nScores: Joueur 1 = {self.scores[0]}, Joueur 2 = {self.scores[1]}")
+    def display_board(self, turn_number=0, last_move=None, depth_reached=None, calc_time=None):
+        # Display last move if provided
+        if last_move:
+            formated_last_move = ''
+            if last_move[1][0] < 9:
+                formated_last_move = f'0{last_move[1][0] + 1}'
+            else:
+                formated_last_move = f'{last_move[1][0] + 1}'
+            if last_move[1][1] == 0:
+                formated_last_move += 'R'
+            else:
+                formated_last_move += 'B'
+            if depth_reached and calc_time:
+                print(f"\nJ{3-self.current_player} ({self.player_types[((turn_number - 1) % 2) + 1]}[{calc_time:.2f}s, {depth_reached} depth]): {formated_last_move}")
+            else:
+                print(f"\nJ{3-self.current_player} ({self.player_types[((turn_number - 1) % 2) + 1]}): {formated_last_move}")
+
+        # Display turn and scores header
+        scores_str = f"T{turn_number if turn_number is not None else '?'} (J1={self.scores[0]}, J2={self.scores[1]}):\n"
+        print(f"\n{scores_str}")
+
+        # Display hole numbers
+        holes_str = "  N: " + " ".join(f"{i+1:02d}" for i in range(16))
+        print(holes_str)
+
+        # Display separator
+        separator = "     " + "-" * 47
+        print(separator)
+
+        # Display red seeds
+        red_seeds = [f"{hole[0]:02d}" for hole in self.board]
+        print("  R: " + " ".join(red_seeds))
+
+        # Display blue seeds
+        blue_seeds = [f"{hole[1]:02d}" for hole in self.board]
+        print("  B: " + " ".join(blue_seeds))
+
+        # Display separator
+        print(separator)
+
+        # Display total seeds in each hole
+        total_seeds = [f"{sum(hole):02d}" for hole in self.board]
+        print("  T: " + " ".join(total_seeds))
+
+    def display_game_end(self, player_types):
+        print("\nENDGAME\n")
+
+        if self.scores[0] == self.scores[1]:
+            print("WINNER: TIE")
+        else:
+            winner = 1 if self.scores[0] > self.scores[1] else 2
+            print(f"WINNER: J{winner} ({player_types[winner]})")
+
+        print("\nSCORE:")
+        print(f"  J1 ({player_types[1]}): {self.scores[0]}")
+        print(f"  J2 ({player_types[2]}): {self.scores[1]}")
 
     def is_valid_move(self, hole, color):
         if hole is None or color is None:
@@ -292,26 +339,22 @@ class AwaleGame:
                 except:
                     break
 
-            print(f"Profondeur atteinte : {depth - 1}, Temps de calcul : {time.time() - start_time:.2f}s")
-            return best_move
+            # print(f"Profondeur atteinte : {depth - 1}, Temps de calcul : {time.time() - start_time:.2f}s")
+            return best_move, depth - 1, time.time() - start_time
 
         elif ptype == "ai_random":
             valid_moves = self.get_valid_moves()
-            return random.choice(valid_moves) if valid_moves else None
+            return random.choice(valid_moves) if valid_moves else None, None, None
 
     def run_game(self):
         turn_counter = 0
-        self.display_board()
+        self.display_board(turn_number=turn_counter)
 
         while not self.game_over():
             turn_counter += 1
-            print(f"\nTour n°{turn_counter}, Joueur {self.current_player}")
-
-            move = self.get_move_for_current_player()
-
+            move, depth, calc_time = self.get_move_for_current_player()
             if move is None:
                 break
-
             hole, color = move
             try:
                 self.play_move(hole, color)
@@ -320,13 +363,18 @@ class AwaleGame:
                 turn_counter -= 1
                 continue
 
-            self.display_board()
+            self.display_board(
+                turn_number=turn_counter,
+                last_move=(self.player_types[self.current_player], move),
+                depth_reached=depth,
+                calc_time=calc_time
+            )
 
-        print(f"\nPartie terminée en {turn_counter} tours ! Le gagnant est : {self.get_winner()}")
-        print(razzoring)
+        self.display_game_end(self.player_types)
+        # print(f"\nPartie terminée en {turn_counter} tours ! Le gagnant est : {self.get_winner()}")
 
 if __name__ == "__main__":
-    player1_type = "human"
+    player1_type = "ai_random"
     player2_type = "ai_random"
 
     game = AwaleGame(player1_type=player1_type, player2_type=player2_type)

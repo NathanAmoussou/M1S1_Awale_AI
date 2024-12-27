@@ -295,7 +295,7 @@ class AwaleGame:
 #   "human", "ai_minimax", ou "ai_random"
 #
 # Exemple : Joueur 1 = Minimax, Joueur 2 = Random
-player1_type = "ai_minimax"
+player1_type = "ai_random"
 player2_type = "ai_random"
 
 game = AwaleGame(player1_type=player1_type, player2_type=player2_type)
