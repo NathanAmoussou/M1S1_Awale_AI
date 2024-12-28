@@ -1,8 +1,4 @@
-# data_export.py
-import csv
-import json
-import os
-import pandas as pd
+import csv, json, os
 
 def write_game_to_csv(csv_filename, game_data, fieldnames=None):
     """
@@ -58,20 +54,3 @@ def write_games_to_csv(csv_filename, games_data, fieldnames=None):
             game_data_serialized = game_data.copy()
             game_data_serialized['moves'] = json.dumps(game_data_serialized['moves'])
             writer.writerow(game_data_serialized)
-
-def read_csv_to_dataframe(csv_filename):
-    """
-    Read the CSV file into a Pandas DataFrame, parsing the 'moves' column as JSON.
-
-    Parameters:
-        csv_filename (str): The path to the CSV file.
-
-    Returns:
-        pd.DataFrame: DataFrame containing the game data.
-    """
-    df = pd.read_csv(csv_filename)
-    if 'moves' in df.columns:
-        df['moves'] = df['moves'].apply(json.loads)
-    return df
-
-# Additional export functions can be added here, such as exporting to JSON or databases

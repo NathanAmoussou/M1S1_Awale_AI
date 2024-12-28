@@ -1,4 +1,3 @@
-# agents.py
 import random
 import math
 import time

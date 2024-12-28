@@ -1,5 +1,5 @@
 from board_rules_interface import AwaleGame
-from agents import HumanAgent, RandomAgent, GPTMinimaxAgentV2, ClaudeMinimaxAgentV1
+import agents
 import data_export
 import os
 import re
@@ -151,9 +151,9 @@ if __name__ == "__main__":
     # )
 
     # GPTMinimaxAgentV2 vs. ClaudeMinimaxAgentV1
-    num_games = 300
-    agent1_class = RandomAgent
-    agent2_class = RandomAgent
+    num_games = 1
+    agent1_class = agents.ClaudeMinimaxAgentV1
+    agent2_class = agents.RandomAgent
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
 
@@ -162,5 +162,5 @@ if __name__ == "__main__":
         agent1_class=agent1_class,
         agent2_class=agent2_class,
         directory=directory,
-        max_time=1
+        max_time=2
     )
