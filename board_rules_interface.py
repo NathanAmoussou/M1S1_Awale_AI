@@ -72,14 +72,66 @@ class AwaleGame:
         print(f"  J1 ({player_types[1].__class__.__name__}): {self.scores[0]}")
         print(f"  J2 ({player_types[2].__class__.__name__}): {self.scores[1]}")
 
+    # Claude AI evaluation function
     def evaluate(self) -> int:
         """
-        Simple evaluation: difference of scores from the current player's perspective.
+        Enhanced evaluation function with multiple strategic considerations.
         """
-        if self.current_player == 1:
-            return self.scores[0] - self.scores[1]
+        my_index = self.current_player - 1
+        opp_index = 1 - my_index
+
+        # 1. Score difference (most important)
+        score_diff = self.scores[my_index] - self.scores[opp_index]
+
+        # 2. Control of the board
+        my_holes = self.player_holes[self.current_player]
+        opp_holes = self.player_holes[3 - self.current_player]
+
+        # Calculate seeds under control
+        my_seeds = {
+            'red': sum(self.board[h][0] for h in my_holes),
+            'blue': sum(self.board[h][1] for h in my_holes)
+        }
+        opp_seeds = {
+            'red': sum(self.board[h][0] for h in opp_holes),
+            'blue': sum(self.board[h][1] for h in opp_holes)
+        }
+
+        # 3. Capture opportunities
+        capture_potential = 0
+        for hole in range(16):
+            total_seeds = sum(self.board[hole])
+            if total_seeds in [1, 4]:  # One move away from capture
+                if hole in my_holes:
+                    capture_potential += 2
+                else:
+                    capture_potential -= 2
+
+        # 4. Mobility score (number of possible moves)
+        my_mobility = sum(1 for h in my_holes for c in [0, 1] if self.board[h][c] > 0)
+        opp_mobility = sum(1 for h in opp_holes for c in [0, 1] if self.board[h][c] > 0)
+        mobility_score = my_mobility - opp_mobility
+
+        # 5. Seed distribution (prefer spread out seeds)
+        my_distribution = sum(1 for h in my_holes if sum(self.board[h]) > 0)
+        opp_distribution = sum(1 for h in opp_holes if sum(self.board[h]) > 0)
+        distribution_score = my_distribution - opp_distribution
+
+        # 6. End game considerations
+        total_seeds = sum(sum(hole) for hole in self.board)
+        if total_seeds < 16:  # End game is near
+            score_diff_weight = 100  # Increase importance of actual score
         else:
-            return self.scores[1] - self.scores[0]
+            score_diff_weight = 50
+
+        # Weighted sum of all factors
+        return (
+            score_diff_weight * score_diff +
+            30 * (sum(my_seeds.values()) - sum(opp_seeds.values())) +
+            20 * capture_potential +
+            15 * mobility_score +
+            10 * distribution_score
+        )
 
     def is_valid_move(self, hole, color):
         if hole is None or color is None:
