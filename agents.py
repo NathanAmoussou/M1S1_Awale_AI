@@ -16,7 +16,7 @@ class Agent:
             game_state (AwaleGame): The current state of the game.
 
         Returns:
-            tuple: A tuple (hole, color) representing the move.
+            tuple: A tuple ((hole, color), elapsed time, depth) or (hole, color) or None.
         """
         raise NotImplementedError("This method should be overridden by subclasses.")
 
@@ -36,7 +36,7 @@ class HumanAgent(Agent):
                 hole = int(input("Choisissez un trou (1-16) : ")) - 1
                 color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
                 if game_state.is_valid_move(hole, color):
-                    return (hole, color)
+                    return (hole, color), None, None
                 else:
                     print("Coup invalide. Veuillez réessayer.")
             except ValueError:
@@ -56,10 +56,10 @@ class RandomAgent(Agent):
         valid_moves = game_state.get_valid_moves()
         if not valid_moves:
             print("Aucun coup valide disponible.")
-            return None
+            return None, None, None
         move = random.choice(valid_moves)
         print(f"IA aléatoire a choisi le coup: Hole {move[0]+1} Color {'R' if move[1]==0 else 'B'}")
-        return move
+        return move, None, None
 
 class GPTMinimaxAgentV2(Agent):
     def __init__(self, max_time=2):
@@ -109,8 +109,8 @@ class GPTMinimaxAgentV2(Agent):
             depth += 1
 
         total_time = time.time() - start_time
-        print(f"Temps de calcul (Minimax) : {total_time:.2f}s, profondeur atteinte : {depth - 1}")
-        return best_move_found
+        # print(f"Temps de calcul (Minimax) : {total_time:.2f}s, profondeur atteinte : {depth - 1}")
+        return best_move_found, total_time, depth - 1
 
     def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time):
         """
@@ -255,8 +255,8 @@ class ClaudeMinimaxAgentV1(Agent):
 
             depth += 1
 
-        print(f"Reached depth: {depth-1}")
-        return best_move_found
+        # print(f"Reached depth: {depth-1}")
+        return best_move_found, time.time() - start_time, depth - 1
 
 
     # claude minimax

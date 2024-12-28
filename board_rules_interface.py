@@ -268,9 +268,9 @@ class AwaleGame:
         while not self.game_over():
             turn_counter += 1
             move = self.get_move_for_current_player()
-            if move is None:
+            if move == (None, None, None):
                 break
-            hole, color = move
+            (hole, color), compute_time, depth_reached = move
             try:
                 self.play_move(hole, color)
             except ValueError as e:
@@ -280,7 +280,9 @@ class AwaleGame:
 
             self.display_board(
                 turn_number=turn_counter,
-                last_move=(self.current_player, move),
+                last_move=(self.current_player, (hole, color)),
+                depth_reached=depth_reached,
+                calc_time=compute_time
             )
 
         self.display_game_end(self.player_agents)
