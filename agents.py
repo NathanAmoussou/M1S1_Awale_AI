@@ -61,7 +61,7 @@ class RandomAgent(Agent):
         print(f"IA aléatoire a choisi le coup: Hole {move[0]+1} Color {'R' if move[1]==0 else 'B'}")
         return move
 
-class MinimaxAgent(Agent):
+class GPTMinimaxAgentV2(Agent):
     def __init__(self, max_time=2):
         """
         Initialize the Minimax agent.
@@ -71,6 +71,137 @@ class MinimaxAgent(Agent):
         """
         self.max_time = max_time
 
+    def get_move(self, game_state):
+        """
+        Determine the best move using the Minimax algorithm with alpha-beta pruning.
+
+        Parameters:
+            game_state (AwaleGame): The current state of the game.
+
+        Returns:
+            tuple: A tuple (hole, color) representing the best move found.
+        """
+        start_time = time.time()
+        depth = 1
+        best_move_found = None
+
+        while True:
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= self.max_time:
+                break
+
+            try:
+                eval_val, move = self.minimax(
+                    game_state.clone(),
+                    depth,
+                    -math.inf,
+                    math.inf,
+                    True,  # Maximizing player
+                    start_time,
+                    self.max_time
+                )
+                if move is not None:
+                    best_move_found = move
+            except Exception as e:
+                print(f"Exception during minimax at depth {depth}: {e}")
+                break
+
+            depth += 1
+
+        total_time = time.time() - start_time
+        print(f"Temps de calcul (Minimax) : {total_time:.2f}s, profondeur atteinte : {depth - 1}")
+        return best_move_found
+
+    def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time):
+        """
+        Recursive Minimax function with alpha-beta pruning.
+
+        Parameters:
+            game_state (AwaleGame): The current state of the game.
+            depth (int): Current depth in the game tree.
+            alpha (float): Alpha value for pruning.
+            beta (float): Beta value for pruning.
+            maximizing_player (bool): True if the current layer is maximizing, False otherwise.
+            start_time (float): The start time of the computation.
+            max_time (float): Maximum allowed computation time.
+
+        Returns:
+            tuple: (evaluation value, best move)
+        """
+        # Time check
+        if time.time() - start_time >= max_time:
+            return game_state.GPT_evaluate_V2(), None
+
+        # Terminal condition
+        if game_state.game_over() or depth == 0:
+            return game_state.GPT_evaluate_V2(), None
+
+        moves = game_state.get_valid_moves()
+        if not moves:
+            return game_state.GPT_evaluate_V2(), None
+
+        best_move = None
+
+        if maximizing_player:
+            max_eval = -math.inf
+            for move in moves:
+                # Time check within loop
+                if time.time() - start_time >= max_time:
+                    break
+
+                clone_state = game_state.clone()
+                clone_state.play_move(*move)
+                eval_val, _ = self.minimax(
+                    clone_state,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    False,  # Switch to minimizing
+                    start_time,
+                    max_time
+                )
+                if eval_val > max_eval:
+                    max_eval = eval_val
+                    best_move = move
+                alpha = max(alpha, eval_val)
+                if beta <= alpha:
+                    break  # Beta cut-off
+            return max_eval, best_move
+        else:
+            min_eval = math.inf
+            for move in moves:
+                if time.time() - start_time >= max_time:
+                    break
+
+                clone_state = game_state.clone()
+                clone_state.play_move(*move)
+                eval_val, _ = self.minimax(
+                    clone_state,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    True,  # Switch to maximizing
+                    start_time,
+                    max_time
+                )
+                if eval_val < min_eval:
+                    min_eval = eval_val
+                    best_move = move
+                beta = min(beta, eval_val)
+                if beta <= alpha:
+                    break  # Alpha cut-off
+            return min_eval, best_move
+
+class ClaudeMinimaxAgentV1(Agent):
+    def __init__(self, max_time=2):
+        """
+        Initialize the Minimax agent.
+
+        Parameters:
+            max_time (float): Maximum time allowed for move computation in seconds.
+        """
+        self.max_time = max_time
+        self.nodes_cut = 0
         # flag can be: 'EXACT', 'LOWERBOUND', or 'UPPERBOUND'
         self.transposition_table = {}
         # Move ordering table stores historical success of moves
@@ -127,6 +258,7 @@ class MinimaxAgent(Agent):
         print(f"Reached depth: {depth-1}")
         return best_move_found
 
+
     # claude minimax
     def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time, is_root=False):
         # Time check
@@ -141,12 +273,12 @@ class MinimaxAgent(Agent):
                 return stored_value, stored_move
 
         if game_state.game_over() or depth == 0:
-            eval_val = game_state.evaluate()
+            eval_val = game_state.claude_evaluate_V1()
             return eval_val, None
 
         moves = self._order_moves(game_state.get_valid_moves())
         if not moves:
-            return game_state.evaluate(), None
+            return game_state.claude_evaluate_V1(), None
 
         best_move = None
         best_value = -math.inf if maximizing_player else math.inf
@@ -177,6 +309,7 @@ class MinimaxAgent(Agent):
                 beta = min(beta, eval_val)
 
             if beta <= alpha:
+                self.nodes_cut += 1
                 break
 
         # Store in transposition table

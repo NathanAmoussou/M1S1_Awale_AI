@@ -72,8 +72,42 @@ class AwaleGame:
         print(f"  J1 ({player_types[1].__class__.__name__}): {self.scores[0]}")
         print(f"  J2 ({player_types[2].__class__.__name__}): {self.scores[1]}")
 
+    def GPT_evaluate_V2(self) -> int:
+        """
+        A more advanced evaluation function for your new Awale variant.
+        Considers:
+            1) Captured seeds difference
+            2) Board control (seeds in my holes - seeds in opp holes)
+            3) Imminent capture threats
+        """
+        my_index = self.current_player - 1
+        opp_index = 1 - my_index
+
+        # 1) Captured difference
+        captured_diff = self.scores[my_index] - self.scores[opp_index]
+
+        # 2) Board control
+        my_holes = self.player_holes[self.current_player]
+        opp_holes = self.player_holes[3 - self.current_player]
+        my_seeds = sum(sum(self.board[h]) for h in my_holes)
+        opp_seeds = sum(sum(self.board[h]) for h in opp_holes)
+        board_control = my_seeds - opp_seeds
+
+        # 3) Threat: number of opponent holes with 1 or 2 or 3 seeds minus my holes with 1 or 2 seeds or 3 seeds
+        opp_threat = sum(1 for h in opp_holes if 1 <= sum(self.board[h]) <= 3)
+        my_threat = sum(1 for h in my_holes if 1 <= sum(self.board[h]) <= 3)
+        threat_score = opp_threat - my_threat
+
+        # Weighted sum
+        # Example weights: 50 for captured seeds (heavily important),
+        #                  5 for board control,
+        #                  3 for threat potential
+        # EVAL = 50 * captured_diff + 5 * board_control + 3 * threat_score
+        EVAL = 3 * captured_diff + 5 * board_control + 50 * threat_score
+        return EVAL
+
     # Claude AI evaluation function
-    def evaluate(self) -> int:
+    def claude_evaluate_V1(self) -> int:
         """
         Enhanced evaluation function with multiple strategic considerations.
         """
