@@ -13,6 +13,7 @@ class AwaleGame:
             1: player1_agent,
             2: player2_agent
         }
+        self.turn_number = 0
 
     def display_board(self, turn_number=0, last_move=None, depth_reached=None, calc_time=None):
         # Display last move if provided
@@ -64,6 +65,8 @@ class AwaleGame:
 
         if self.scores[0] == self.scores[1]:
             print("WINNER: TIE")
+        elif self.turn_number >= 150:
+            print("WINNER: TIE (turn limit reached)")
         else:
             winner = 1 if self.scores[0] > self.scores[1] else 2
             print(f"WINNER: J{winner} ({player_types[winner].__class__.__name__})")
@@ -71,6 +74,7 @@ class AwaleGame:
         print("\nSCORE:")
         print(f"  J1 ({player_types[1].__class__.__name__}): {self.scores[0]}")
         print(f"  J2 ({player_types[2].__class__.__name__}): {self.scores[1]}")
+        print()
 
     def GPT_evaluate_V2(self) -> int:
         """
@@ -246,6 +250,8 @@ class AwaleGame:
             return True
         if self.scores[0] == 32 and self.scores[1] == 32:
             return True
+        if self.turn_number >= 150:
+            return True
         return False
 
     def get_winner(self):
@@ -262,11 +268,10 @@ class AwaleGame:
         return move
 
     def run_game(self):
-        turn_counter = 0
-        self.display_board(turn_number=turn_counter)
+        self.display_board(turn_number=self.turn_number)
 
         while not self.game_over():
-            turn_counter += 1
+            self.turn_number += 1
             move = self.get_move_for_current_player()
             if move == (None, None, None):
                 break
@@ -275,11 +280,11 @@ class AwaleGame:
                 self.play_move(hole, color)
             except ValueError as e:
                 print(e)
-                turn_counter -= 1
+                self.turn_number -= 1
                 continue
 
             self.display_board(
-                turn_number=turn_counter,
+                turn_number=self.turn_number,
                 last_move=(self.current_player, (hole, color)),
                 depth_reached=depth_reached,
                 calc_time=compute_time
