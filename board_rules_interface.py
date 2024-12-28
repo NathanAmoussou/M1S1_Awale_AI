@@ -1,7 +1,7 @@
 from agents import Agent
 
 class AwaleGame:
-    def __init__(self, player1_agent: Agent, player2_agent: Agent):
+    def __init__(self, player1_agent: Agent, player2_agent: Agent, game_id=None):
         self.board = [[2, 2] for _ in range(16)]
         self.scores = [0, 0]
         self.player_holes = {
@@ -14,6 +14,8 @@ class AwaleGame:
             2: player2_agent
         }
         self.turn_number = 0
+        self.game_id = game_id
+        self.moves_log = []
 
     def display_board(self, turn_number=0, last_move=None, depth_reached=None, calc_time=None):
         # Display last move if provided
@@ -276,12 +278,24 @@ class AwaleGame:
             if move == (None, None, None):
                 break
             (hole, color), compute_time, depth_reached = move
+
+            board_before_move = [hole.copy() for hole in self.board]
+
             try:
                 self.play_move(hole, color)
             except ValueError as e:
                 print(e)
                 self.turn_number -= 1
                 continue
+
+            self.moves_log.append({
+                'turn_number': self.turn_number,
+                'player': self.current_player,
+                'board_before_move': board_before_move,
+                'move': {'hole': hole, 'color': color},
+                'compute_time': compute_time,
+                'depth_reached': depth_reached
+            })
 
             self.display_board(
                 turn_number=self.turn_number,
@@ -291,3 +305,18 @@ class AwaleGame:
             )
 
         self.display_game_end(self.player_agents)
+
+    def get_game_data(self):
+        """
+        Retrieve all relevant game data for logging.
+        """
+        return {
+            'game_id': self.game_id,
+            'player1_agent': self.player_agents[1].__class__.__name__,
+            'player2_agent': self.player_agents[2].__class__.__name__,
+            'moves': self.moves_log,
+            'winner': self.get_winner(),
+            'player1_score': self.scores[0],
+            'player2_score': self.scores[1],
+            'number_of_turns': self.turn_number
+        }
