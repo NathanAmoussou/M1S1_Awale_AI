@@ -1,9 +1,19 @@
-# main.py
 from board_rules_interface import AwaleGame
 from agents import HumanAgent, RandomAgent, GPTMinimaxAgentV2, ClaudeMinimaxAgentV1
 import data_export
 import os
 import re
+import logging
+import time
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler("game_generation.log"),
+        logging.StreamHandler()
+    ]
+)
 
 def get_next_filename(directory, agent1_class, agent2_class, num_games):
     """
@@ -65,6 +75,12 @@ def run_multiple_games(num_games, agent1_class, agent2_class, max_time=2, direct
 
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
 
+    logging.info(f"Exporting games to: {csv_filename}")
+
+    # Record the start time
+    start_time = time.time()
+    logging.info("Simulation started.")
+
     for game_id in range(1, num_games + 1):
         # Instantiate agents
         player1_agent = agent1_class() if agent1_class.__name__ == 'RandomAgent' else agent1_class(max_time=max_time)
@@ -80,7 +96,17 @@ def run_multiple_games(num_games, agent1_class, agent2_class, max_time=2, direct
         # Use data_export module to write to CSV
         data_export.write_game_to_csv(csv_filename, game_data)
 
-        print(f"Game {game_id} completed. Winner: {game_data['winner']}")
+        logging.info(f"Game {game_id}/{num_games} completed. Winner: {game_data['winner']}")
+
+    # Record the end time
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+
+    # Convert elapsed time to hours, minutes, seconds
+    hours, rem = divmod(elapsed_time, 3600)
+    minutes, seconds = divmod(rem, 60)
+    logging.info(f"Simulation completed in {int(hours)}h {int(minutes)}m {int(seconds)}s.")
+
 
 if __name__ == "__main__":
     # Instantiate agents
@@ -125,8 +151,8 @@ if __name__ == "__main__":
     # )
 
     # GPTMinimaxAgentV2 vs. ClaudeMinimaxAgentV1
-    num_games = 2
-    agent1_class = GPTMinimaxAgentV2
+    num_games = 300
+    agent1_class = RandomAgent
     agent2_class = RandomAgent
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
