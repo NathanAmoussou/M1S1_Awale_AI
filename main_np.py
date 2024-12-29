@@ -1,6 +1,6 @@
-from board_rules_interface import AwaleGame
-import agents
-import data_export
+from board_rules_interface_np import AwaleGame
+import agents_np
+import data_export_np
 import os
 import re
 import logging
@@ -94,7 +94,7 @@ def run_multiple_games(num_games, agent1_class, agent2_class, max_time=2, direct
         game_data = game.get_game_data()
 
         # Use data_export module to write to CSV
-        data_export.write_game_to_csv(csv_filename, game_data)
+        data_export_np.write_game_to_csv(csv_filename, game_data)
 
         logging.info(f"Game {game_id}/{num_games} completed. Winner: {game_data['winner']}")
 
@@ -109,7 +109,6 @@ def run_multiple_games(num_games, agent1_class, agent2_class, max_time=2, direct
 
 
 if __name__ == "__main__":
-
     # Instantiate agents
     # Example configurations:
 
@@ -153,8 +152,8 @@ if __name__ == "__main__":
 
     # GPTMinimaxAgentV2 vs. ClaudeMinimaxAgentV1
     num_games = 1
-    agent1_class = agents.ClaudeMinimaxAgentV1
-    agent2_class = agents.RandomAgent
+    agent1_class = agents_np.ClaudeMinimaxAgentV1
+    agent2_class = agents_np.RandomAgent
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
 
