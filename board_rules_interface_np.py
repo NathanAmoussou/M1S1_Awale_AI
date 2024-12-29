@@ -272,7 +272,7 @@ class AwaleGame:
         while not self.game_over():
             self.turn_number += 1
             move = self.get_move_for_current_player()
-            if move == (None, None, None):
+            if move == (None, None, None) or move[0] == None:
                 break
             (hole, color), compute_time, depth_reached = move
 

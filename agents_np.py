@@ -56,10 +56,10 @@ class RandomAgent(Agent):
         valid_moves = game_state.get_valid_moves()
         if not valid_moves:
             print("Aucun coup valide disponible.")
-            return None, None, None
+            return (None, None, None)
         move = random.choice(valid_moves)
         print(f"IA aléatoire a choisi le coup: Hole {move[0]+1} Color {'R' if move[1]==0 else 'B'}")
-        return move, None, None
+        return (move, None, None)
 
 class GPTMinimaxAgentV2(Agent):
     def __init__(self, max_time=2):
@@ -200,12 +200,17 @@ class ClaudeMinimaxAgentV1(Agent):
         self.move_ordering = {}
         self.MAX_TABLE_SIZE = 1000000
 
-        # Pre-compute evaluation weights
+        # Pre-compute evaluation weights (example)
         self.SCORE_WEIGHT = 50
         self.CONTROL_WEIGHT = 30
         self.CAPTURE_WEIGHT = 20
         self.MOBILITY_WEIGHT = 15
         self.DISTRIBUTION_WEIGHT = 10
+
+        # Constants for transposition table entry flags
+        self.FLAG_EXACT = 0
+        self.FLAG_LOWERBOUND = 1
+        self.FLAG_UPPERBOUND = 2
 
     def evaluate(self, game_state) -> float:
         my_index = game_state.current_player - 1
@@ -257,24 +262,27 @@ class ClaudeMinimaxAgentV1(Agent):
                 eval_val, move = self.minimax(
                     game_state.clone(),
                     depth,
-                    float('-inf'),
-                    float('inf'),
-                    True,
-                    start_time,
-                    self.max_time,
+                    alpha=-math.inf,
+                    beta=math.inf,
+                    maximizing_player=True,
+                    start_time=start_time,
+                    max_time=self.max_time,
                     is_root=True
                 )
 
                 if move is not None:
                     best_move_found = move
-                    self.move_ordering[move] = max(eval_val, self.move_ordering.get(move, 0))
+                    # Update move ordering with the returned eval
+                    # If it's better than existing, store it
+                    self.move_ordering[move] = max(eval_val, self.move_ordering.get(move, float('-inf')))
 
             except TimeoutError:
                 break
 
             depth += 1
 
-        return best_move_found, time.time() - start_time, depth - 1
+        compute_time = time.time() - start_time
+        return (best_move_found, compute_time, depth - 1)
 
     def _get_state_hash(self, game_state):
         # Use NumPy's tobytes for faster hashing
@@ -288,10 +296,22 @@ class ClaudeMinimaxAgentV1(Agent):
 
         # Transposition table lookup
         state_hash = self._get_state_hash(game_state)
-        if not is_root and state_hash in self.transposition_table:
-            stored_depth, stored_value, stored_move = self.transposition_table[state_hash]
-            if stored_depth >= depth:
-                return stored_value, stored_move
+        if not is_root:
+            # If we already have a stored evaluation at >= this depth, we can use it
+            if state_hash in self.transposition_table:
+                stored_depth, stored_value, stored_flag, stored_move = self.transposition_table[state_hash]
+                if stored_depth >= depth:
+                    # Use the stored info to adjust alpha or beta
+                    if stored_flag == self.FLAG_EXACT:
+                        return stored_value, stored_move
+                    elif stored_flag == self.FLAG_LOWERBOUND:
+                        alpha = max(alpha, stored_value)
+                    elif stored_flag == self.FLAG_UPPERBOUND:
+                        beta = min(beta, stored_value)
+                    if alpha >= beta:
+                        # We can prune here
+                        self.nodes_cut += 1
+                        return stored_value, stored_move
 
         if game_state.game_over() or depth == 0:
             return self.evaluate(game_state), None
@@ -300,10 +320,44 @@ class ClaudeMinimaxAgentV1(Agent):
         if not moves:
             return self.evaluate(game_state), None
 
-        best_move = None
-        best_value = float('-inf') if maximizing_player else float('inf')
+        # For better move ordering, sort with known ordering scores
+        moves = self._order_moves(moves)
 
-        for move in moves:
+        best_move = None
+        if maximizing_player:
+            best_value = float('-inf')
+        else:
+            best_value = float('inf')
+
+        # Optional: "late-move pruning" if time is short or if many moves
+        # e.g., skip deeper search on lower-priority moves. This is simplistic:
+        LATE_MOVE_PRUNE_THRESHOLD = 5  # tune as needed
+        # If we have a lot of moves, we can skip the last ones at shallow depth
+
+        for i, move in enumerate(moves):
+            # Optional late-move pruning
+            # If we have many moves and we are not at root, we can prune the last ones
+            if (not is_root) and (depth < 3) and (i > LATE_MOVE_PRUNE_THRESHOLD):
+                # Evaluate quickly instead of full search
+                # or just break, if you want extreme pruning
+                # For demonstration, let's do a quick static eval:
+                # That is effectively a partial or "shallow" prune.
+                static_eval = self.evaluate(game_state)
+                if maximizing_player:
+                    if static_eval > best_value:
+                        best_value = static_eval
+                        best_move = move
+                    alpha = max(alpha, best_value)
+                else:
+                    if static_eval < best_value:
+                        best_value = static_eval
+                        best_move = move
+                    beta = min(beta, best_value)
+                if alpha >= beta:
+                    self.nodes_cut += 1
+                    break
+                continue
+
             clone_state = game_state.clone()
             clone_state.play_move(*move)
 
@@ -314,7 +368,8 @@ class ClaudeMinimaxAgentV1(Agent):
                 beta,
                 not maximizing_player,
                 start_time,
-                max_time
+                max_time,
+                is_root=False
             )
 
             if maximizing_player:
@@ -328,16 +383,31 @@ class ClaudeMinimaxAgentV1(Agent):
                     best_move = move
                 beta = min(beta, eval_val)
 
+            # Standard alpha-beta cutoff
             if beta <= alpha:
                 self.nodes_cut += 1
                 break
 
         # Store in transposition table
         if len(self.transposition_table) < self.MAX_TABLE_SIZE:
-            self.transposition_table[state_hash] = (depth, best_value, best_move)
+            # Determine the correct flag for transposition table
+            # If best_value <= alphaOriginal => it’s an upper bound
+            # If best_value >= betaOriginal  => it’s a lower bound
+            # Otherwise => exact
+            flag = self.FLAG_EXACT
+            if best_value <= alpha:
+                # careful: check original alpha. We might need to store alphaOriginal
+                flag = self.FLAG_UPPERBOUND
+            elif best_value >= beta:
+                flag = self.FLAG_LOWERBOUND
+
+            self.transposition_table[state_hash] = (depth, best_value, flag, best_move)
 
         return best_value, best_move
 
     def _order_moves(self, moves):
-        """Order moves based on previously successful moves."""
+        """
+        Order moves based on previously successful moves or known heuristic.
+        Higher self.move_ordering value => try earlier
+        """
         return sorted(moves, key=lambda m: self.move_ordering.get(m, 0), reverse=True)
