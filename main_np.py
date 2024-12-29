@@ -1,3 +1,4 @@
+#main_np.py
 from board_rules_interface_np import AwaleGame
 import agents_np
 import data_export_np
@@ -153,7 +154,7 @@ if __name__ == "__main__":
     # GPTMinimaxAgentV2 vs. ClaudeMinimaxAgentV1
     num_games = 1
     agent1_class = agents_np.ClaudeMinimaxAgentV1
-    agent2_class = agents_np.RandomAgent
+    agent2_class = agents_np.ClaudeMinimaxAgentV1
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
 
