@@ -1,0 +1,345 @@
+import random
+import math
+import time
+import numpy as np
+import numba_func
+
+class Agent:
+    """
+    Abstract base class for all agents.
+    """
+    def get_move(self, game_state):
+        """
+        Determine the next move.
+        Must be overridden by subclasses.
+
+        Parameters:
+            game_state (AwaleGame): The current state of the game.
+
+        Returns:
+            tuple: A tuple ((hole, color), elapsed time, depth) or (hole, color) or None.
+        """
+        raise NotImplementedError("This method should be overridden by subclasses.")
+
+class HumanAgent(Agent):
+    def get_move(self, game_state):
+        """
+        Prompt the human player to input a move.
+
+        Parameters:
+            game_state (AwaleGame): The current state of the game.
+
+        Returns:
+            tuple: A tuple (hole, color) representing the move.
+        """
+        while True:
+            try:
+                hole = int(input("Choisissez un trou (1-16) : ")) - 1
+                color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
+                if game_state.is_valid_move(hole, color):
+                    return (hole, color), None, None
+                else:
+                    print("Coup invalide. Veuillez réessayer.")
+            except ValueError:
+                print("Entrée invalide. Veuillez entrer des nombres valides.")
+
+class RandomAgent(Agent):
+    def get_move(self, game_state):
+        """
+        Select a random valid move.
+
+        Parameters:
+            game_state (AwaleGame): The current state of the game.
+
+        Returns:
+            tuple: A tuple (hole, color) representing the move, or None if no moves are available.
+        """
+        valid_moves = game_state.get_valid_moves()
+        if not valid_moves:
+            print("Aucun coup valide disponible.")
+            return None, None, None
+        move = random.choice(valid_moves)
+        print(f"IA aléatoire a choisi le coup: Hole {move[0]+1} Color {'R' if move[1]==0 else 'B'}")
+        return move, None, None
+
+class GPTMinimaxAgentV2(Agent):
+    def __init__(self, max_time=2):
+        """
+        Initialize the Minimax agent.
+
+        Parameters:
+            max_time (float): Maximum time allowed for move computation in seconds.
+        """
+        self.max_time = max_time
+
+    def get_move(self, game_state):
+        """
+        Determine the best move using the Minimax algorithm with alpha-beta pruning.
+
+        Parameters:
+            game_state (AwaleGame): The current state of the game.
+
+        Returns:
+            tuple: A tuple (hole, color) representing the best move found.
+        """
+        start_time = time.time()
+        depth = 1
+        best_move_found = None
+
+        while True:
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= self.max_time:
+                break
+
+            try:
+                eval_val, move = self.minimax(
+                    game_state.clone(),
+                    depth,
+                    -math.inf,
+                    math.inf,
+                    True,  # Maximizing player
+                    start_time,
+                    self.max_time
+                )
+                if move is not None:
+                    best_move_found = move
+            except Exception as e:
+                print(f"Exception during minimax at depth {depth}: {e}")
+                break
+
+            depth += 1
+
+        total_time = time.time() - start_time
+        # print(f"Temps de calcul (Minimax) : {total_time:.2f}s, profondeur atteinte : {depth - 1}")
+        return best_move_found, total_time, depth - 1
+
+    def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time):
+        """
+        Recursive Minimax function with alpha-beta pruning.
+
+        Parameters:
+            game_state (AwaleGame): The current state of the game.
+            depth (int): Current depth in the game tree.
+            alpha (float): Alpha value for pruning.
+            beta (float): Beta value for pruning.
+            maximizing_player (bool): True if the current layer is maximizing, False otherwise.
+            start_time (float): The start time of the computation.
+            max_time (float): Maximum allowed computation time.
+
+        Returns:
+            tuple: (evaluation value, best move)
+        """
+        # Time check
+        if time.time() - start_time >= max_time:
+            return game_state.GPT_evaluate_V2(), None
+
+        # Terminal condition
+        if game_state.game_over() or depth == 0:
+            return game_state.GPT_evaluate_V2(), None
+
+        moves = game_state.get_valid_moves()
+        if not moves:
+            return game_state.GPT_evaluate_V2(), None
+
+        best_move = None
+
+        if maximizing_player:
+            max_eval = -math.inf
+            for move in moves:
+                # Time check within loop
+                if time.time() - start_time >= max_time:
+                    break
+
+                clone_state = game_state.clone()
+                clone_state.play_move(*move)
+                eval_val, _ = self.minimax(
+                    clone_state,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    False,  # Switch to minimizing
+                    start_time,
+                    max_time
+                )
+                if eval_val > max_eval:
+                    max_eval = eval_val
+                    best_move = move
+                alpha = max(alpha, eval_val)
+                if beta <= alpha:
+                    break  # Beta cut-off
+            return max_eval, best_move
+        else:
+            min_eval = math.inf
+            for move in moves:
+                if time.time() - start_time >= max_time:
+                    break
+
+                clone_state = game_state.clone()
+                clone_state.play_move(*move)
+                eval_val, _ = self.minimax(
+                    clone_state,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    True,  # Switch to maximizing
+                    start_time,
+                    max_time
+                )
+                if eval_val < min_eval:
+                    min_eval = eval_val
+                    best_move = move
+                beta = min(beta, eval_val)
+                if beta <= alpha:
+                    break  # Alpha cut-off
+            return min_eval, best_move
+
+timeout_flag = False
+
+class ClaudeMinimaxAgentV1(Agent):
+    def __init__(self, max_time=2):
+        self.max_time = max_time
+
+        # Pre-compute evaluation weights
+        self.SCORE_WEIGHT = 50
+        self.CONTROL_WEIGHT = 30
+        self.CAPTURE_WEIGHT = 20
+        self.MOBILITY_WEIGHT = 15
+
+    def get_move(self, game_state):
+        start_time = time.time()
+        depth = 1
+        best_move_found = None
+        last_complete_depth = 0
+
+        while True:
+            elapsed_time = time.time() - start_time
+            # Leave a 10% buffer to avoid exceeding max_time
+            if elapsed_time >= self.max_time * 0.9:
+                break
+
+            try:
+                eval_val, move = self.minimax(
+                    board=game_state.board.copy(),
+                    scores=game_state.scores.copy(),
+                    current_player=game_state.current_player,
+                    depth=depth,
+                    alpha=-math.inf,
+                    beta=math.inf,
+                    maximizing_player=True,
+                    start_time=start_time,
+                    max_time=self.max_time
+                )
+                if move is not None:
+                    best_move_found = move
+                    last_complete_depth = depth
+            except TimeoutError:
+                # If we timeout during a depth, revert to last complete depth's move
+                break
+
+            depth += 1
+
+        total_time = time.time() - start_time
+        return best_move_found, total_time, last_complete_depth
+
+    def minimax(self, board, scores, current_player, depth, alpha, beta, maximizing_player, start_time, max_time) -> Tuple[int, Optional[Tuple[int, int]]]:
+        global timeout_flag
+        if time.time() - start_time >= max_time:
+            raise TimeoutError()
+
+        if depth == 0 or self.is_game_over(board, scores):
+            eval_val = numba_func.evaluate_position_numba(
+                board, scores, current_player,
+                self.SCORE_WEIGHT, self.CONTROL_WEIGHT,
+                self.CAPTURE_WEIGHT, self.MOBILITY_WEIGHT
+            )
+            return eval_val, None
+
+        valid_moves = numba_func.get_valid_moves_numba(board, current_player)
+        if not valid_moves:
+            eval_val = numba_func.evaluate_position_numba(
+                board, scores, current_player,
+                self.SCORE_WEIGHT, self.CONTROL_WEIGHT,
+                self.CAPTURE_WEIGHT, self.MOBILITY_WEIGHT
+            )
+            return eval_val, None
+
+        best_move = None
+
+        if maximizing_player:
+            max_eval = -math.inf
+            for move in valid_moves:
+                if time.time() - start_time >= max_time:
+                    raise TimeoutError()
+
+                # Clone the board and scores
+                new_board = board.copy()
+                new_scores = scores.copy()
+
+                # Apply the move using Numba
+                numba_func.play_move_numba(new_board, new_scores, current_player, move[0], move[1])
+
+                # Recursive call
+                eval_val, _ = self.minimax(
+                    board=new_board,
+                    scores=new_scores,
+                    current_player=3 - current_player,
+                    depth=depth - 1,
+                    alpha=alpha,
+                    beta=beta,
+                    maximizing_player=False,
+                    start_time=start_time,
+                    max_time=max_time
+                )
+
+                if eval_val > max_eval:
+                    max_eval = eval_val
+                    best_move = move
+
+                alpha = max(alpha, eval_val)
+                if beta <= alpha:
+                    break  # Beta cut-off
+
+            return max_eval, best_move
+
+        else:
+            min_eval = math.inf
+            for move in valid_moves:
+                if time.time() - start_time >= max_time:
+                    raise TimeoutError()
+
+                # Clone the board and scores
+                new_board = board.copy()
+                new_scores = scores.copy()
+
+                # Apply the move using Numba
+                numba_func.play_move_numba(new_board, new_scores, current_player, move[0], move[1])
+
+                # Recursive call
+                eval_val, _ = self.minimax(
+                    board=new_board,
+                    scores=new_scores,
+                    current_player=3 - current_player,
+                    depth=depth - 1,
+                    alpha=alpha,
+                    beta=beta,
+                    maximizing_player=True,
+                    start_time=start_time,
+                    max_time=max_time
+                )
+
+                if eval_val < min_eval:
+                    min_eval = eval_val
+                    best_move = move
+
+                beta = min(beta, eval_val)
+                if beta <= alpha:
+                    break  # Alpha cut-off
+
+            return min_eval, best_move
+
+    def is_game_over(self, board, scores) -> bool:
+        total_seeds = np.sum(board)
+        max_score = max(scores[0], scores[1])
+        return (total_seeds < 8 or
+                max_score >= 33 or
+                (scores[0] == 32 and scores[1] == 32))
