@@ -153,8 +153,8 @@ if __name__ == "__main__":
 
     # GPTMinimaxAgentV2 vs. ClaudeMinimaxAgentV1
     num_games = 1
-    agent1_class = agents_np.ClaudeMinimaxAgentV1
-    agent2_class = agents_np.ClaudeMinimaxAgentV1
+    agent1_class = agents_np.MinimaxAgent6_1
+    agent2_class = agents_np.MinimaxAgent6_4
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
 
