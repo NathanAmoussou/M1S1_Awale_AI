@@ -35,14 +35,23 @@ class HumanAgent(Agent):
         """
         while True:
             try:
-                hole = int(input("Choisissez un trou (1-16) : ")) - 1
-                color = int(input("Choisissez une couleur (0 = Rouge, 1 = Bleu) : "))
+                move = input("\nEnter your move (e.g., 1R or 01R for red, 1B for blue): ").strip().upper()
+
+                # Validate input format
+                if len(move) < 2 or not move[:-1].isdigit() or move[-1] not in ['R', 'B']:
+                    raise ValueError("Invalid format. Use a number (1-16) followed by R or B.")
+
+                # Extract hole and color
+                hole = int(move[:-1]) - 1
+                color = 0 if move[-1] == 'R' else 1  # 0 = Red, 1 = Blue
+
+                # Check if the move is valid
                 if game_state.is_valid_move(hole, color):
                     return (hole, color), None, None
                 else:
-                    print("Coup invalide. Veuillez réessayer.")
-            except ValueError:
-                print("Entrée invalide. Veuillez entrer des nombres valides.")
+                    print("Invalid move. Please try again.")
+            except ValueError as e:
+                print(e)
 
 class RandomAgent(Agent):
     def get_move(self, game_state):
