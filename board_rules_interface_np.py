@@ -83,101 +83,6 @@ class AwaleGame:
         print(f"  J2 ({player_types[2].__class__.__name__}): {self.scores[1]}")
         print()
 
-    def GPT_evaluate_V2(self) -> int:
-        """
-        A more advanced evaluation function for your new Awale variant.
-        Considers:
-            1) Captured seeds difference
-            2) Board control (seeds in my holes - seeds in opp holes)
-            3) Imminent capture threats
-        """
-        my_index = self.current_player - 1
-        opp_index = 1 - my_index
-
-        # 1) Captured difference
-        captured_diff = self.scores[my_index] - self.scores[opp_index]
-
-        # 2) Board control
-        my_holes = self.player_holes[self.current_player]
-        opp_holes = self.player_holes[3 - self.current_player]
-        my_seeds = sum(sum(self.board[h]) for h in my_holes)
-        opp_seeds = sum(sum(self.board[h]) for h in opp_holes)
-        board_control = my_seeds - opp_seeds
-
-        # 3) Threat: number of opponent holes with 1 or 2 or 3 seeds minus my holes with 1 or 2 seeds or 3 seeds
-        opp_threat = sum(1 for h in opp_holes if 1 <= sum(self.board[h]) <= 3)
-        my_threat = sum(1 for h in my_holes if 1 <= sum(self.board[h]) <= 3)
-        threat_score = opp_threat - my_threat
-
-        # Weighted sum
-        # Example weights: 50 for captured seeds (heavily important),
-        #                  5 for board control,
-        #                  3 for threat potential
-        # EVAL = 50 * captured_diff + 5 * board_control + 3 * threat_score
-        EVAL = 3 * captured_diff + 5 * board_control + 50 * threat_score
-        return EVAL
-
-    # Claude AI evaluation function
-    def claude_evaluate_V1(self) -> int:
-        """
-        Enhanced evaluation function with multiple strategic considerations.
-        """
-        my_index = self.current_player - 1
-        opp_index = 1 - my_index
-
-        # 1. Score difference (most important)
-        score_diff = self.scores[my_index] - self.scores[opp_index]
-
-        # 2. Control of the board
-        my_holes = self.player_holes[self.current_player]
-        opp_holes = self.player_holes[3 - self.current_player]
-
-        # Calculate seeds under control
-        my_seeds = {
-            'red': sum(self.board[h][0] for h in my_holes),
-            'blue': sum(self.board[h][1] for h in my_holes)
-        }
-        opp_seeds = {
-            'red': sum(self.board[h][0] for h in opp_holes),
-            'blue': sum(self.board[h][1] for h in opp_holes)
-        }
-
-        # 3. Capture opportunities
-        capture_potential = 0
-        for hole in range(16):
-            total_seeds = sum(self.board[hole])
-            if total_seeds in [1, 4]:  # One move away from capture
-                if hole in my_holes:
-                    capture_potential += 2
-                else:
-                    capture_potential -= 2
-
-        # 4. Mobility score (number of possible moves)
-        my_mobility = sum(1 for h in my_holes for c in [0, 1] if self.board[h][c] > 0)
-        opp_mobility = sum(1 for h in opp_holes for c in [0, 1] if self.board[h][c] > 0)
-        mobility_score = my_mobility - opp_mobility
-
-        # 5. Seed distribution (prefer spread out seeds)
-        my_distribution = sum(1 for h in my_holes if sum(self.board[h]) > 0)
-        opp_distribution = sum(1 for h in opp_holes if sum(self.board[h]) > 0)
-        distribution_score = my_distribution - opp_distribution
-
-        # 6. End game considerations
-        total_seeds = sum(sum(hole) for hole in self.board)
-        if total_seeds < 16:  # End game is near
-            score_diff_weight = 100  # Increase importance of actual score
-        else:
-            score_diff_weight = 50
-
-        # Weighted sum of all factors
-        return (
-            score_diff_weight * score_diff +
-            30 * (sum(my_seeds.values()) - sum(opp_seeds.values())) +
-            20 * capture_potential +
-            15 * mobility_score +
-            10 * distribution_score
-        )
-
     def is_valid_move(self, hole: int, color: int) -> bool:
         if hole is None or color is None:
             return False
@@ -211,7 +116,7 @@ class AwaleGame:
         current_index = hole
         while seeds_to_sow > 0:
             current_index = (current_index + 1) % 16
-            if current_index == hole:
+            if current_index == hole or self.board[current_index].sum() >= 16:
                 continue
 
             if color == 0:  # Red seeds

@@ -84,8 +84,8 @@ def run_multiple_games(num_games, agent1_class, agent2_class, max_time=2, direct
 
     for game_id in range(1, num_games + 1):
         # Instantiate agents
-        player1_agent = agent1_class() if agent1_class.__name__ == 'RandomAgent' else agent1_class(max_time=max_time)
-        player2_agent = agent2_class() if agent2_class.__name__ == 'RandomAgent' else agent2_class(max_time=max_time)
+        player1_agent = agent1_class() if (agent1_class.__name__ == 'RandomAgent' or agent1_class.__name__ == 'HumanAgent') else agent1_class(max_time=max_time)
+        player2_agent = agent2_class() if (agent2_class.__name__ == 'RandomAgent' or agent2_class.__name__ == 'HumanAgent') else agent2_class(max_time=max_time)
 
         # Initialize the game with the selected agents and assign game_id
         game = AwaleGame(player1_agent=player1_agent, player2_agent=player2_agent, game_id=game_id)
@@ -110,54 +110,11 @@ def run_multiple_games(num_games, agent1_class, agent2_class, max_time=2, direct
 
 
 if __name__ == "__main__":
-    # Instantiate agents
-    # Example configurations:
-
-    # Human vs. Random
-    # player1_agent = HumanAgent()
-    # player2_agent = RandomAgent()
-
-    # Minimax vs. Random
-    # player1_agent = MinimaxAgent(max_time=2)
-    # player2_agent = RandomAgent()
-
-    # Human vs. Minimax
-    # player1_agent = HumanAgent()
-    # player2_agent = MinimaxAgent(max_time=2)
-
-    # Minimax vs. Minimax
-    # player1_agent = MinimaxAgent(max_time=2)
-    # player2_agent = MinimaxAgent(max_time=2)
-
-    # GPTV2 vs. ClaudeV1
-    # player1_agent = GPTMinimaxAgentV2(max_time=2)
-    # player2_agent = ClaudeMinimaxAgentV1(max_time=2)
-
-    # Initialize the game with the selected agents
-    # game = AwaleGame(player1_agent=player1_agent, player2_agent=player2_agent)
-    # game.run_game()
-    # Example configurations:
-
-    # Human vs. Random (Not suitable for automated CSV logging since HumanAgent requires input)
-    # player1_agent = HumanAgent
-    # player2_agent = RandomAgent
-
-    # Random vs. Random
-    # run_multiple_games(
-    #     num_games=100,
-    #     agent1_class=RandomAgent,
-    #     agent2_class=RandomAgent,
-    #     max_time=2,
-    #     csv_filename='random_vs_random.csv'
-    # )
-
-    # GPTMinimaxAgentV2 vs. ClaudeMinimaxAgentV1
     num_games = 1
-    agent1_class = agents_np.MinimaxAgent6_4
-    agent2_class = agents_np.MinimaxAgent6_6_1
+    agent1_class = agents_np.RandomAgent
+    agent2_class = agents_np.MinimaxAgent6_4
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
-
     run_multiple_games(
         num_games=num_games,  # Adjust the number as needed
         agent1_class=agent1_class,

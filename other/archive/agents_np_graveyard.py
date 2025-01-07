@@ -1736,3 +1736,384 @@ class MinimaxAgent6_6_1(MinimaxAgent6):
         clone.play_move(*move)
         after_seeds = np.sum(clone.board)
         return after_seeds < before_seeds
+
+class MinimaxAgent7(MinimaxAgent6_4):
+    """
+    Inherits from MinimaxAgent6_4, adds specialized domain-specific evaluation:
+      - Chain-capture heuristic
+      - Starving / forced endgame logic
+      - Avoid having 2/3 seeds on our side (optional penalty)
+      - Possibly reward red-seed usage when leading, etc.
+    """
+
+    def __init__(self, max_time=2):
+        super().__init__(max_time)
+        # You can define separate weights/bonuses here
+        # for the domain-specific heuristics:
+        self.CHAIN_CAPTURE_BONUS = 8     # how much to reward each potential 2-or-3 on opponent side
+        self.STARVING_BONUS       = 50   # how much to reward leading with <8 seeds left
+        self.HOLE_DANGER_PENALTY  = 2    # penalty per hole with 2 or 3 seeds on our side
+
+    def evaluate(self, game_state) -> float:
+        """
+        Override the evaluate function to incorporate chain-capture, starvation, etc.
+        We'll still call super().evaluate() to keep the old logic,
+        then add or subtract domain-specific heuristics.
+        """
+        base_eval = super().evaluate(game_state)
+
+        # Identify basic references
+        my_index = game_state.current_player - 1
+        opp_index = 1 - my_index
+        my_holes = game_state.player_holes[game_state.current_player]
+        opp_holes = game_state.player_holes[3 - game_state.current_player]
+
+        # Score difference
+        score_diff = game_state.scores[my_index] - game_state.scores[opp_index]
+
+        # Count seeds on board
+        board_total = np.sum(game_state.board)
+        # Mobility checks
+        opp_moves = 0
+        # The game_state's get_valid_moves is always for current_player, so we do a quick hack:
+        # Temporarily swap current_player to check the opponent's possible moves.
+        current_player_backup = game_state.current_player
+        game_state.current_player = 3 - current_player_backup
+        opp_valid_moves = game_state.get_valid_moves()
+        opp_moves = len(opp_valid_moves)
+        # Restore current_player
+        game_state.current_player = current_player_backup
+
+        # ----------------------------------------------------------------------
+        # CHAIN-CAPTURE POTENTIAL
+        # A simpler (static) approach is to count how many holes on the opponent's side
+        # are exactly 1 or 4 seeds => they can be turned into 2 or 3 on your next sow.
+        # You can also count how many holes on your side are 2 or 3 (which is dangerous).
+        # This is just a static measure; you might do more advanced checks if you like.
+        # ----------------------------------------------------------------------
+        total_seeds_per_hole = np.sum(game_state.board, axis=1)
+
+        # Count how many opp holes are at 1 or 4 => potential to become 2/3
+        opp_1_or_4 = np.sum((total_seeds_per_hole[opp_holes] == 1) |
+                            (total_seeds_per_hole[opp_holes] == 4))
+
+        # We'll give a small bonus for each such hole,
+        # representing potential chain capture on next move
+        chain_capture_score = self.CHAIN_CAPTURE_BONUS * opp_1_or_4
+
+        # ----------------------------------------------------------------------
+        # STARVING / ENDGAME LOGIC
+        # If we are leading and board_total < 8 => big bonus (we're about to lock in a win)
+        # If opponent has no moves => also a big bonus.
+        # ----------------------------------------------------------------------
+        starving_score = 0
+        if board_total < 8:
+            # If I'm leading, add a big bonus to reflect nearly guaranteed win
+            if score_diff > 0:
+                starving_score += self.STARVING_BONUS * (1 + score_diff / 2.0)
+                # factor in score_diff a bit
+
+        # If the opponent literally has no valid moves => also a bonus
+        if opp_moves == 0:
+            # Usually that means they can’t move, so you can starve out or capture more seeds
+            # If you're already ahead, that likely means you'll soon end the game winning
+            starving_score += self.STARVING_BONUS * (1 + max(score_diff, 1) / 2.0)
+
+        # ----------------------------------------------------------------------
+        # HOLE DANGER: Having your own holes at exactly 2 or 3 seeds is risky
+        # Because the opponent can sow a single red seed there to capture them.
+        # We'll apply a small penalty for each hole on your side that has 2 or 3 seeds.
+        # ----------------------------------------------------------------------
+        my_2_or_3 = np.sum((total_seeds_per_hole[my_holes] == 2) |
+                           (total_seeds_per_hole[my_holes] == 3))
+        hole_danger_penalty = -1 * self.HOLE_DANGER_PENALTY * my_2_or_3
+
+        # ----------------------------------------------------------------------
+        # Combine everything
+        # ----------------------------------------------------------------------
+        domain_specific_eval = chain_capture_score + starving_score + hole_danger_penalty
+
+        return base_eval + domain_specific_eval
+
+class MinimaxAgent8(MinimaxAgent6_4):
+    """
+    A 'greedy' variant that:
+      1) Strongly rewards immediate captures (looks at all possible moves this turn).
+      2) Penalizes having holes with 2 or 3 seeds on our side (easy for opponent to capture).
+      3) Gives a bonus for opponent holes at 0 seeds (starving them).
+    Inherits all the search logic from MinimaxAgent6_4, only overrides evaluate().
+    """
+
+    def __init__(self, max_time=2):
+        super().__init__(max_time)
+        # You can tweak these constants:
+        self.IMMEDIATE_CAPTURE_WEIGHT = 25    # weight per seed captured immediately
+        self.HOLE_2_3_PENALTY         = 3     # penalty per hole with 2 or 3 seeds on our side
+        self.OPP_HOLE_EMPTY_BONUS     = 2     # bonus per empty hole on opponent's side
+
+    def evaluate(self, game_state) -> float:
+        """
+        Overrides the MinimaxAgent6_4 evaluation to add a greedy, immediate-capture twist
+        plus some defensive and starvation logic.
+        """
+        # 1) Start with the base evaluate from 6_4 (which already includes your standard
+        #    scoring, mobility, etc., plus any 1-ply capture ordering at move_score).
+        base_eval = super().evaluate(game_state)
+
+        # 2) Grab references: which holes are ours vs. opponent's
+        my_index = game_state.current_player - 1
+        opp_index = 1 - my_index
+        my_holes = game_state.player_holes[game_state.current_player]
+        opp_holes = game_state.player_holes[3 - game_state.current_player]
+
+        # 3) Check immediate captures: simulate *all* valid moves for the current player
+        #    and see the maximum number of seeds we can capture this turn.
+        current_valid_moves = game_state.get_valid_moves()
+        max_immediate_capture = 0
+        if current_valid_moves:
+            for move in current_valid_moves:
+                clone_state = game_state.clone()
+                before_seeds = np.sum(clone_state.board)
+                clone_state.play_move(*move)
+                after_seeds = np.sum(clone_state.board)
+                captured = before_seeds - after_seeds
+                if captured > max_immediate_capture:
+                    max_immediate_capture = captured
+
+        # 4) Penalize having holes with 2 or 3 seeds on our side
+        total_seeds_per_hole = np.sum(game_state.board, axis=1)
+        my_2_or_3 = np.sum((total_seeds_per_hole[my_holes] == 2) |
+                           (total_seeds_per_hole[my_holes] == 3))
+        hole_2_3_penalty = - self.HOLE_2_3_PENALTY * my_2_or_3
+
+        # 5) Reward each 0-seed hole on the opponent's side
+        opp_empty_holes = np.sum(total_seeds_per_hole[opp_holes] == 0)
+        opp_empty_bonus = self.OPP_HOLE_EMPTY_BONUS * opp_empty_holes
+
+        # 6) Combine everything into a single domain-specific score
+        #    - immediate_capture_score: big plus for large immediate captures
+        immediate_capture_score = self.IMMEDIATE_CAPTURE_WEIGHT * max_immediate_capture
+
+        domain_specific_eval = immediate_capture_score + hole_2_3_penalty + opp_empty_bonus
+
+        return base_eval + domain_specific_eval
+
+class MinimaxAgent6_4_2(MinimaxAgent6_4):
+    """
+    Inherits from MinimaxAgent6_4:
+      1) Adds killer/history move ordering.
+      2) Stores a full principal variation at each node (via PV table) for deeper iterative deepening.
+    """
+
+    def __init__(self, max_time=2, max_depth=50):
+        super().__init__(max_time)
+
+        # The maximum search depth we might handle (arbitrary upper bound).
+        self.MAX_DEPTH = max_depth
+
+        # 1) Killer moves: for each depth, we keep a small dictionary or map
+        #    from move -> "killer score". We’ll track the top 1 or 2 killer moves per depth.
+        self.killer_moves = [defaultdict(int) for _ in range(self.MAX_DEPTH + 1)]
+
+        # 2) History table: move -> integer. The higher the integer, the more we order that move first.
+        self.history_table = defaultdict(int)
+
+        # 3) PV table: store a best line for each (state_hash, depth).
+        #    Key: (hash, depth), Value: [list of moves].
+        self.pv_table = {}
+
+    def get_move(self, game_state):
+        """
+        Similar iterative deepening as in MinimaxAgent6_4, but we’ll store a full PV each iteration.
+        """
+        start_time = time.time()
+        depth = 1
+        best_move_found = None
+        best_line_found = []
+
+        while True:
+            if (time.time() - start_time) >= self.max_time:
+                break
+
+            try:
+                # We also retrieve a "best_line" from the search
+                eval_val, move, line = self.minimax(
+                    game_state.clone(),
+                    depth,
+                    alpha=-math.inf,
+                    beta=math.inf,
+                    maximizing_player=True,
+                    start_time=start_time,
+                    max_time=self.max_time,
+                    is_root=True
+                )
+                if move is not None:
+                    best_move_found = move
+                    best_line_found = line
+
+                # We store the entire PV for the root node
+                # so next iteration can reorder moves.
+                state_hash = self._get_state_hash(game_state)
+                self.pv_table[(state_hash, depth)] = line
+
+            except TimeoutError:
+                break
+
+            depth += 1
+
+        compute_time = time.time() - start_time
+        return (best_move_found, compute_time, depth - 1)
+
+    def minimax(
+        self,
+        game_state,
+        depth,
+        alpha,
+        beta,
+        maximizing_player,
+        start_time,
+        max_time,
+        is_root=False
+    ):
+        """
+        Overridden to:
+          1) Return (best_eval, best_move, best_line).
+          2) Update killer/history tables on beta-cutoffs.
+          3) Check our PV table for deeper reordering, not just root.
+        """
+        if (time.time() - start_time) >= max_time:
+            raise TimeoutError()
+
+        state_hash = self._get_state_hash(game_state)
+        # Transposition Table check (same logic)
+        if not is_root and state_hash in self.transposition_table:
+            stored_depth, stored_value, stored_flag, stored_move = self.transposition_table[state_hash]
+            if stored_depth >= depth:
+                if stored_flag == self.FLAG_EXACT:
+                    return stored_value, stored_move, [stored_move]
+                elif stored_flag == self.FLAG_LOWERBOUND:
+                    alpha = max(alpha, stored_value)
+                elif stored_flag == self.FLAG_UPPERBOUND:
+                    beta = min(beta, stored_value)
+                if alpha >= beta:
+                    self.nodes_cut += 1
+                    # Return a trivial line with just the stored_move
+                    return stored_value, stored_move, [stored_move]
+
+        # Terminal or depth-0
+        if game_state.game_over() or depth == 0:
+            static_eval = self.evaluate(game_state)
+            return static_eval, None, []
+
+        valid_moves = game_state.get_valid_moves()
+        if not valid_moves:
+            # No moves => evaluate
+            static_eval = self.evaluate(game_state)
+            return static_eval, None, []
+
+        # -------------- ORDER MOVES --------------
+        moves = self._order_moves(game_state, valid_moves, depth, is_root)
+
+        best_value = float('-inf') if maximizing_player else float('inf')
+        best_move = None
+        best_line = []
+
+        for mv in moves:
+            clone_state = game_state.clone()
+            clone_state.play_move(*mv)
+
+            try:
+                eval_val, _, child_line = self.minimax(
+                    clone_state,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    not maximizing_player,
+                    start_time,
+                    max_time,
+                    is_root=False
+                )
+            except TimeoutError:
+                raise
+
+            if maximizing_player:
+                if eval_val > best_value:
+                    best_value = eval_val
+                    best_move = mv
+                    best_line = [mv] + child_line
+                alpha = max(alpha, best_value)
+            else:
+                if eval_val < best_value:
+                    best_value = eval_val
+                    best_move = mv
+                    best_line = [mv] + child_line
+                beta = min(beta, best_value)
+
+            # Beta cutoff
+            if beta <= alpha:
+                self.nodes_cut += 1
+
+                # -------------- KILLER / HISTORY UPDATE --------------
+                # If not is_root, record the move in killer & history
+                if depth <= self.MAX_DEPTH:
+                    self.killer_moves[depth][mv] += 1
+                    self.history_table[mv] += depth * depth
+
+                break
+
+        # Store in TT
+        if len(self.transposition_table) < self.MAX_TABLE_SIZE:
+            flag = self.FLAG_EXACT
+            if best_value <= alpha:
+                flag = self.FLAG_UPPERBOUND
+            elif best_value >= beta:
+                flag = self.FLAG_LOWERBOUND
+            self.transposition_table[state_hash] = (depth, best_value, flag, best_move)
+
+        # Also store this node’s best line in the PV table
+        self.pv_table[(state_hash, depth)] = best_line
+
+        return best_value, best_move, best_line
+
+    # ----------------------------------------------------------------------
+    #        Overridden _order_moves with PV + Killer/History
+    # ----------------------------------------------------------------------
+    def _order_moves(self, game_state, moves, depth, is_root):
+        """
+        Now we incorporate:
+          1) Full PV ordering if we have a stored line in self.pv_table[(state_hash, depth)].
+          2) Killer/History heuristics in the final sorting.
+        """
+        state_hash = self._get_state_hash(game_state)
+
+        # 1) If we have a known PV line for (state_hash, depth), put that move first
+        #    (like a multi-move approach: we only reorder the 1st move in that line).
+        pv_line = self.pv_table.get((state_hash, depth), [])
+        pv_move = pv_line[0] if len(pv_line) > 0 else None
+
+        # 2) We'll define an internal scoring function that includes:
+        #    - existing 1-ply capture check (via self._move_score)
+        #    - killer moves
+        #    - history table
+        def move_order_score(mv):
+            base_score = self._move_score(game_state, mv)  # your capture-based scoring
+
+            # Killer bonus
+            killer_score = self.killer_moves[depth].get(mv, 0)
+            killer_bonus = 1000 * killer_score
+
+            # History bonus
+            hist_bonus = self.history_table[mv] * 0.1
+
+            return base_score + killer_bonus + hist_bonus
+
+        # If the PV move is in the list, put it up front
+        if pv_move in moves:
+            first = [pv_move]
+            rest = [m for m in moves if m != pv_move]
+            # Sort the rest by move_order_score
+            rest_sorted = sorted(rest, key=move_order_score, reverse=True)
+            return first + rest_sorted
+        else:
+            # Sort everything by move_order_score
+            return sorted(moves, key=move_order_score, reverse=True)

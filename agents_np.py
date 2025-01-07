@@ -1,7 +1,9 @@
+#agents_np.py
 import random
 import math
 import time
 import numpy as np
+from collections import defaultdict
 
 class Agent:
     """
@@ -58,7 +60,7 @@ class RandomAgent(Agent):
             print("Aucun coup valide disponible.")
             return (None, None, None)
         move = random.choice(valid_moves)
-        print(f"IA aléatoire a choisi le coup: Hole {move[0]+1} Color {'R' if move[1]==0 else 'B'}")
+        # print(f"IA aléatoire a choisi le coup: Hole {move[0]+1} Color {'R' if move[1]==0 else 'B'}")
         return (move, None, None)
 
 class MinimaxAgent6(Agent):
@@ -68,6 +70,7 @@ class MinimaxAgent6(Agent):
         self.transposition_table = {}
         self.move_ordering = {}
         self.MAX_TABLE_SIZE = 1000000
+        # self.MAX_TABLE_SIZE = 1000000000
 
         # Pre-compute evaluation weights (example)
         self.SCORE_WEIGHT = 50
@@ -111,7 +114,6 @@ class MinimaxAgent6(Agent):
                 self.CAPTURE_WEIGHT * capture_potential +
                 self.MOBILITY_WEIGHT * (my_mobility - opp_mobility))
 
-    # claude get move
     def get_move(self, game_state):
         start_time = time.time()
         depth = 1
