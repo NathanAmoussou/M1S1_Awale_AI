@@ -2117,3 +2117,1321 @@ class MinimaxAgent6_4_2(MinimaxAgent6_4):
         else:
             # Sort everything by move_order_score
             return sorted(moves, key=move_order_score, reverse=True)
+
+class MinimaxAgent6_6_2(MinimaxAgent6):
+    """
+    Enhanced Minimax agent implementing:
+    - Null-move pruning
+    - Futility pruning (razoring)
+    - Principal Variation (PV) move ordering
+    - Enhanced capture detection
+    - Transposition table
+    - Late move reduction
+    """
+
+    def __init__(self, max_time=2):
+        super().__init__(max_time)
+        self.null_move_reduction = 3
+        self.null_move_eval_margin = 50
+        self.futility_depth_limit = 3
+        self.futility_margins = {1: 100, 2: 300, 3: 500}
+        self.pv_table = {}
+        self.pv_length = [0] * 64
+        self.lmr_depth_threshold = 3
+        self.lmr_move_threshold = 4
+        self.history_table = {}
+        self.max_depth = 50  # Increased max depth
+        self.max_recursion_count = 1000
+
+    def _should_apply_futility(self, depth: int, maximizing_player: bool) -> bool:
+        return (depth <= self.futility_depth_limit and
+                not maximizing_player)  # Only apply to minimizing nodes
+
+    def _is_futile(self, static_eval: float, alpha: float, depth: int) -> bool:
+        margin = self.futility_margins.get(depth, 100)
+        return static_eval + margin <= alpha
+
+    def _handle_futility(self, game_state, valid_moves, static_eval):
+        """
+        Handle futility pruning by limiting search to capturing moves if any.
+        """
+        # Filter capturing moves
+        captures = [move for move in valid_moves if self._is_capturing_move(game_state, move)]
+
+        if not captures:
+            # No captures, prune and return static evaluation
+            return static_eval, None
+
+        # Continue with captures if any are present
+        return None, captures
+
+    def _tt_lookup(self, game_state, depth: int, alpha: float, beta: float):
+        state_hash = self._get_state_hash(game_state)
+        if state_hash in self.transposition_table:
+            stored_depth, stored_value, stored_flag, stored_move = self.transposition_table[state_hash]
+            if stored_depth >= depth:
+                if stored_flag == self.FLAG_EXACT:
+                    return stored_value, stored_move
+                if stored_flag == self.FLAG_LOWERBOUND:
+                    alpha = max(alpha, stored_value)
+                elif stored_flag == self.FLAG_UPPERBOUND:
+                    beta = min(beta, stored_value)
+                if alpha >= beta:
+                    return stored_value, stored_move
+        return None
+
+    def _store_tt_entry(self, game_state, depth: int, value: float, move, alpha: float, beta: float):
+        if len(self.transposition_table) >= self.MAX_TABLE_SIZE:
+            return
+
+        state_hash = self._get_state_hash(game_state)
+        flag = self.FLAG_EXACT
+        if value <= alpha:
+            flag = self.FLAG_UPPERBOUND
+        elif value >= beta:
+            flag = self.FLAG_LOWERBOUND
+
+        self.transposition_table[state_hash] = (depth, value, flag, move)
+
+    def _is_better_move(self, eval_val: float, best_value: float, maximizing_player: bool) -> bool:
+        return ((maximizing_player and eval_val > best_value) or
+                (not maximizing_player and eval_val < best_value))
+
+    def get_move(self, game_state):
+        start_time = time.time()
+        best_move_found = None
+        self.pv_table.clear()
+
+        for depth in range(1, 10):  # Iterative deepening with reasonable limit
+            try:
+                eval_val, move = self.minimax(
+                    game_state.clone(),
+                    depth=depth,
+                    alpha=-math.inf,
+                    beta=math.inf,
+                    maximizing_player=True,
+                    start_time=start_time,
+                    max_time=self.max_time,
+                    is_root=True,
+                    ply=0
+                )
+
+                if move is not None:
+                    best_move_found = move
+
+            except TimeoutError:
+                break
+
+        return best_move_found, time.time() - start_time, depth - 1
+
+    def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time, is_root=False, ply=0):
+        if time.time() - start_time >= max_time:
+            raise TimeoutError()
+
+        if ply >= self.max_depth or game_state.game_over() or depth == 0:
+            return self.evaluate(game_state), None
+
+        valid_moves = game_state.get_valid_moves()
+        if not valid_moves:
+            return self.evaluate(game_state), None
+
+        best_value = float('-inf') if maximizing_player else float('inf')
+        best_move = None
+
+        # Simplified move ordering for stability
+        moves = valid_moves
+        if depth > 2:  # Only order moves at deeper depths
+            try:
+                moves = self._order_moves(game_state, valid_moves, depth, ply)
+            except:
+                pass
+
+        for move in moves:
+            try:
+                clone_state = game_state.clone()
+                clone_state.play_move(*move)
+
+                eval_val, _ = self.minimax(
+                    clone_state,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    not maximizing_player,
+                    start_time,
+                    max_time,
+                    is_root=False,
+                    ply=ply + 1
+                )
+
+                if self._is_better_move(eval_val, best_value, maximizing_player):
+                    best_value = eval_val
+                    best_move = move
+
+                if maximizing_player:
+                    alpha = max(alpha, best_value)
+                else:
+                    beta = min(beta, best_value)
+
+                if beta <= alpha:
+                    break
+
+            except RecursionError:
+                return self.evaluate(game_state), move
+            except:
+                continue
+
+        return best_value, best_move
+
+    def _should_try_null_move(self, game_state, depth, beta):
+        """Enhanced null-move pruning conditions."""
+        if depth < self.null_move_reduction + 1:
+            return False
+        if game_state.game_over():
+            return False
+
+        # Don't try null move if in potential zugzwang
+        total_seeds = np.sum(game_state.board)
+        if total_seeds < 12:  # Endgame position
+            return False
+
+        static_eval = self.evaluate(game_state)
+        if static_eval < beta - self.null_move_eval_margin:
+            return False
+
+        return True
+
+    def _try_null_move(self, game_state, depth, beta, maximizing_player, start_time, max_time, ply):
+        """Execute null move search."""
+        null_state = game_state.clone()
+        null_state.current_player = 3 - null_state.current_player
+
+        try:
+            eval_null, _ = self.minimax(
+                null_state,
+                depth - 1 - self.null_move_reduction,
+                beta - 1,
+                beta,
+                not maximizing_player,
+                start_time,
+                max_time,
+                is_root=False,
+                ply=ply + 1
+            )
+            return eval_null
+        except TimeoutError:
+            raise
+
+    def _update_history(self, move, depth):
+        """Update history heuristic table."""
+        if move not in self.history_table:
+            self.history_table[move] = 0
+        self.history_table[move] += 2 ** depth
+
+    def _update_pv(self, move, ply):
+        """Update principal variation table."""
+        self.pv_table[ply] = move
+        self.pv_length[ply] = self.pv_length[ply + 1] + 1
+
+    def _get_move_depth(self, depth, move_index, is_root):
+        """Determine search depth with LMR."""
+        if (not is_root and
+            depth >= self.lmr_depth_threshold and
+            move_index >= self.lmr_move_threshold):
+            return depth - 1
+        return depth
+
+    def _order_moves(self, game_state, moves, depth, ply):
+        """
+        Enhanced move ordering using multiple heuristics:
+        1. PV moves
+        2. Capturing moves (verified through simulation)
+        3. History heuristic
+        4. Killer moves
+        """
+        move_scores = []
+
+        for move in moves:
+            score = 0
+
+            # PV move gets highest priority
+            if ply in self.pv_table and self.pv_table[ply] == move:
+                score += 10000000
+
+            # Capture detection through simulation
+            if self._is_capturing_move(game_state, move):
+                score += 1000000
+
+            # History heuristic
+            score += self.history_table.get(move, 0)
+
+            move_scores.append((move, score))
+
+        return [move for move, _ in sorted(move_scores, key=lambda x: x[1], reverse=True)]
+
+    def _is_capturing_move(self, game_state, move):
+        clone = game_state.clone()
+        initial_score = clone.scores[clone.current_player - 1]
+
+        try:
+            clone.play_move(*move)
+            return clone.scores[clone.current_player - 1] > initial_score
+        except:
+            return False
+
+class MinimaxAgent6_4_3(MinimaxAgent6_4):
+    def __init__(self, max_time=2):
+        super().__init__(max_time)
+        self.history_table = {}  # Store move history scores
+        self.killer_moves = [[] for _ in range(64)]  # Killer moves per depth
+        self.MAX_KILLER_MOVES = 2
+
+        # Aspiration windows for iterative deepening
+        self.ASPIRATION_WINDOW = 50
+
+        # Enhanced evaluation weights
+        self.ENDGAME_THRESHOLD = 16  # Total seeds threshold for endgame
+        self.TEMPO_BONUS = 5  # Bonus for maintaining initiative
+
+        # Progressive history scaling
+        self.HISTORY_MAX = 10000
+        self.HISTORY_DECAY = 0.9
+
+    def get_move(self, game_state):
+        start_time = time.time()
+        depth = 1
+        best_move_found = None
+
+        # Aspiration windows
+        alpha = float('-inf')
+        beta = float('inf')
+        window = self.ASPIRATION_WINDOW
+
+        while True:
+            if time.time() - start_time >= self.max_time:
+                break
+
+            try:
+                # Use aspiration windows after first iteration
+                if depth > 1:
+                    alpha = max(prev_eval - window, float('-inf'))
+                    beta = min(prev_eval + window, float('inf'))
+
+                eval_val, move = self.minimax(
+                    game_state.clone(),
+                    depth,
+                    alpha,
+                    beta,
+                    maximizing_player=True,
+                    start_time=start_time,
+                    max_time=self.max_time,
+                    is_root=True
+                )
+
+                # Store previous evaluation for aspiration windows
+                prev_eval = eval_val
+
+                if move:
+                    best_move_found = move
+                    self.principal_variation_move = move
+                    # Update history table with depth-based score
+                    self._update_history(move, depth)
+
+            except TimeoutError:
+                break
+            except AspirationFailure:
+                # Window too narrow - retry with full window
+                window *= 2
+                continue
+
+            depth += 1
+            window = self.ASPIRATION_WINDOW  # Reset window
+
+        return (best_move_found, time.time() - start_time, depth - 1)
+
+    def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time, is_root=False):
+        if time.time() - start_time >= max_time:
+            raise TimeoutError()
+
+        alpha_orig = alpha
+
+        # Enhanced transposition table lookup
+        state_hash = self._get_state_hash(game_state)
+        if not is_root:
+            tt_entry = self.transposition_table.get(state_hash)
+            if tt_entry and tt_entry[0] >= depth:
+                stored_depth, stored_value, stored_flag, stored_move = tt_entry
+                if stored_flag == self.FLAG_EXACT:
+                    return stored_value, stored_move
+                elif stored_flag == self.FLAG_LOWERBOUND:
+                    alpha = max(alpha, stored_value)
+                elif stored_flag == self.FLAG_UPPERBOUND:
+                    beta = min(beta, stored_value)
+                if alpha >= beta:
+                    return stored_value, stored_move
+
+        if game_state.game_over() or depth == 0:
+            return self._evaluate_enhanced(game_state, depth), None
+
+        moves = self._order_moves_enhanced(game_state, depth)
+        if not moves:
+            return self._evaluate_enhanced(game_state, depth), None
+
+        best_value = float('-inf') if maximizing_player else float('inf')
+        best_move = None
+
+        # Internal iterative deepening
+        if depth >= 4 and not self.principal_variation_move and not is_root:
+            try:
+                _, iid_move = self.minimax(
+                    game_state,
+                    depth - 2,
+                    alpha,
+                    beta,
+                    maximizing_player,
+                    start_time,
+                    max_time
+                )
+                if iid_move:
+                    self.principal_variation_move = iid_move
+            except TimeoutError:
+                raise
+
+        # Late move reduction
+        for i, move in enumerate(moves):
+            # Full-depth search for first few moves
+            reduction = 0
+            if depth >= 3 and i >= 3 and not self._is_capture_move(game_state, move):
+                reduction = 1 if depth < 6 else 2
+
+            clone_state = game_state.clone()
+            clone_state.play_move(*move)
+
+            try:
+                if reduction == 0:
+                    eval_val, _ = self.minimax(
+                        clone_state,
+                        depth - 1,
+                        -beta,
+                        -alpha,
+                        not maximizing_player,
+                        start_time,
+                        max_time
+                    )
+                    eval_val = -eval_val
+                else:
+                    # Reduced depth search
+                    eval_val, _ = self.minimax(
+                        clone_state,
+                        depth - 1 - reduction,
+                        -alpha - 1,
+                        -alpha,
+                        not maximizing_player,
+                        start_time,
+                        max_time
+                    )
+                    eval_val = -eval_val
+                    # Re-search if promising
+                    if eval_val > alpha:
+                        eval_val, _ = self.minimax(
+                            clone_state,
+                            depth - 1,
+                            -beta,
+                            -alpha,
+                            not maximizing_player,
+                            start_time,
+                            max_time
+                        )
+                        eval_val = -eval_val
+
+            except TimeoutError:
+                raise
+
+            if maximizing_player:
+                if eval_val > best_value:
+                    best_value = eval_val
+                    best_move = move
+                    if depth == 1:
+                        self._update_killer_moves(move, depth)
+                alpha = max(alpha, eval_val)
+            else:
+                if eval_val < best_value:
+                    best_value = eval_val
+                    best_move = move
+                    if depth == 1:
+                        self._update_killer_moves(move, depth)
+                beta = min(beta, eval_val)
+
+            if beta <= alpha:
+                self._update_killer_moves(move, depth)
+                break
+
+        # Update transposition table
+        if len(self.transposition_table) < self.MAX_TABLE_SIZE:
+            flag = self.FLAG_EXACT
+            if best_value <= alpha_orig:
+                flag = self.FLAG_UPPERBOUND
+            elif best_value >= beta:
+                flag = self.FLAG_LOWERBOUND
+            self.transposition_table[state_hash] = (depth, best_value, flag, best_move)
+
+        return best_value, best_move
+
+    def _evaluate_enhanced(self, game_state, depth):
+        base_eval = self.evaluate(game_state)
+        """
+        # Endgame adjustments
+        total_seeds = np.sum(game_state.board)
+        if total_seeds <= self.ENDGAME_THRESHOLD:
+            base_eval *= 1.2  # Increase importance of material in endgame
+
+        # Tempo bonus
+        if game_state.current_player == 1:
+            base_eval += self.TEMPO_BONUS
+        """
+        return base_eval
+
+    def _order_moves_enhanced(self, game_state, depth):
+        moves = game_state.get_valid_moves()
+
+        # Score moves based on multiple criteria
+        move_scores = []
+        for move in moves:
+            score = 0
+
+            # PV move gets highest priority
+            if move == self.principal_variation_move:
+                score += 10000000
+
+            # Killer moves get high priority
+            if move in self.killer_moves[depth]:
+                score += 1000000 * (self.MAX_KILLER_MOVES -
+                                  self.killer_moves[depth].index(move))
+
+            # History heuristic
+            score += self.history_table.get(move, 0)
+
+            # Capture potential
+            if self._is_capture_move(game_state, move):
+                score += 500000
+
+            move_scores.append((move, score))
+
+        return [move for move, _ in sorted(move_scores, key=lambda x: x[1], reverse=True)]
+
+    def _update_history(self, move, depth):
+        current_score = self.history_table.get(move, 0)
+        depth_bonus = depth * depth
+        self.history_table[move] = min(
+            self.HISTORY_MAX,
+            int(current_score * self.HISTORY_DECAY + depth_bonus)
+        )
+
+    def _update_killer_moves(self, move, depth):
+        if move not in self.killer_moves[depth]:
+            self.killer_moves[depth].insert(0, move)
+            if len(self.killer_moves[depth]) > self.MAX_KILLER_MOVES:
+                self.killer_moves[depth].pop()
+
+    def _is_capture_move(self, game_state, move):
+        clone = game_state.clone()
+        pre_score = clone.scores[clone.current_player - 1]
+        clone.play_move(*move)
+        post_score = clone.scores[clone.current_player - 1]
+        return post_score > pre_score
+
+class AspirationFailure(Exception):
+    pass
+
+class HailMarry(MinimaxAgent6):
+    """
+    A MinimaxAgent variant focused purely on defense, avoiding captures at all costs
+    while ignoring offensive opportunities.
+    """
+    def __init__(self, max_time=2):
+        super().__init__(max_time)
+
+        # Override weights to focus entirely on defensive metrics
+        self.VULNERABILITY_WEIGHT = 100  # Weight for avoiding vulnerable positions
+        self.DISTANCE_WEIGHT = 50       # Weight for keeping seeds away from opponent
+        self.DISTRIBUTION_WEIGHT = 30   # Weight for maintaining good seed distribution
+        self.MOBILITY_WEIGHT = 20       # Weight for maintaining move options
+
+        # Precompute opponent holes for faster checks
+        self.opponent_holes = {
+            1: np.array([1, 3, 5, 7, 9, 11, 13, 15]),
+            2: np.array([0, 2, 4, 6, 8, 10, 12, 14])
+        }
+
+        # Cache for vulnerability checks
+        self.vulnerability_cache = {}
+        self.MAX_VULNERABILITY_CACHE = 100000
+
+    @lru_cache(maxsize=10000)
+    def evaluate(self, game_state) -> float:
+        """
+        Purely defensive evaluation function that only cares about:
+        1. Avoiding vulnerable positions (2-3 seeds)
+        2. Keeping seeds away from opponent's side
+        3. Maintaining good seed distribution
+        4. Maintaining mobility
+        """
+        my_index = game_state.current_player - 1
+        my_holes = self.player_holes[game_state.current_player]
+        opp_holes = self.opponent_holes[game_state.current_player]
+
+        # 1. Vulnerability score (avoid positions that could be captured)
+        vulnerability_score = self._calculate_vulnerability(game_state, my_holes)
+
+        # 2. Distance score (prefer keeping seeds away from opponent's capture range)
+        distance_score = self._calculate_distance_safety(game_state, my_holes, opp_holes)
+
+        # 3. Distribution score (prefer evenly distributed seeds)
+        distribution_score = self._calculate_distribution(game_state, my_holes)
+
+        # 4. Mobility score (maintain move options)
+        mobility_score = self._calculate_mobility(game_state, my_holes)
+
+        # Combine scores with weights
+        return (
+            self.VULNERABILITY_WEIGHT * vulnerability_score +
+            self.DISTANCE_WEIGHT * distance_score +
+            self.DISTRIBUTION_WEIGHT * distribution_score +
+            self.MOBILITY_WEIGHT * mobility_score
+        )
+
+    def _calculate_vulnerability(self, game_state, my_holes):
+        """Calculate how vulnerable our positions are to capture"""
+        state_key = (game_state.board.tobytes(), tuple(my_holes))
+
+        if state_key in self.vulnerability_cache:
+            return self.vulnerability_cache[state_key]
+
+        # Count holes with 2 or 3 seeds (highly vulnerable)
+        total_seeds = game_state.board.sum(axis=1)
+        vulnerable_positions = np.sum((total_seeds == 2) | (total_seeds == 3))
+
+        # Count holes with 1 or 4 seeds (potentially vulnerable)
+        semi_vulnerable = np.sum((total_seeds == 1) | (total_seeds == 4))
+
+        # Penalize vulnerable positions heavily
+        vulnerability_score = -(vulnerable_positions * 2 + semi_vulnerable)
+
+        # Cache the result
+        if len(self.vulnerability_cache) < self.MAX_VULNERABILITY_CACHE:
+            self.vulnerability_cache[state_key] = vulnerability_score
+
+        return vulnerability_score
+
+    def _calculate_distance_safety(self, game_state, my_holes, opp_holes):
+        """Calculate how safe our seeds are based on distance from opponent"""
+        total_distance = 0
+        my_seeds = game_state.board[my_holes]
+
+        # Calculate weighted distance of our seeds from opponent's holes
+        for hole in my_holes:
+            seeds = game_state.board[hole].sum()
+            if seeds > 0:
+                # Find minimum distance to any opponent hole
+                distances = np.abs(hole - opp_holes)
+                min_distance = np.min(distances)
+                # Larger distance is better
+                total_distance += seeds * min_distance
+
+        return total_distance
+
+    def _calculate_distribution(self, game_state, my_holes):
+        """Calculate how well distributed our seeds are"""
+        my_seeds = game_state.board[my_holes].sum(axis=1)
+
+        # Prefer more even distribution (lower standard deviation)
+        std_dev = np.std(my_seeds)
+
+        # Also prefer having seeds spread across more holes
+        holes_with_seeds = np.sum(my_seeds > 0)
+
+        return holes_with_seeds - std_dev
+
+    def _calculate_mobility(self, game_state, my_holes):
+        """Calculate our movement options"""
+        # Count how many different moves we have available
+        red_moves = np.sum(game_state.board[my_holes, 0] > 0)
+        blue_moves = np.sum(game_state.board[my_holes, 1] > 0)
+
+        return red_moves + blue_moves
+
+    def _move_score(self, game_state, move):
+        """
+        Override move scoring to prioritize defensive moves.
+        Only care about moves that improve our defensive position.
+        """
+        # Simulate the move
+        clone = game_state.clone()
+        clone.play_move(*move)
+
+        # Calculate vulnerability before and after move
+        before_vuln = self._calculate_vulnerability(
+            game_state,
+            self.player_holes[game_state.current_player]
+        )
+        after_vuln = self._calculate_vulnerability(
+            clone,
+            self.player_holes[clone.current_player]
+        )
+
+        # Prioritize moves that reduce vulnerability
+        vulnerability_improvement = after_vuln - before_vuln
+
+        # Check if move leads to opponent having capture opportunities
+        opponent_captures = self._count_opponent_capture_opportunities(clone)
+
+        # Heavily penalize moves that give opponent capture opportunities
+        if opponent_captures > 0:
+            return float('-inf')
+
+        return vulnerability_improvement
+
+    def _count_opponent_capture_opportunities(self, game_state):
+        """Count how many capture opportunities the opponent would have"""
+        opp_holes = self.opponent_holes[game_state.current_player]
+        total_seeds = game_state.board.sum(axis=1)
+        return np.sum((total_seeds == 2) | (total_seeds == 3))
+
+    def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time, is_root=False):
+        """
+        Override minimax to focus on defensive play.
+        Prune branches that lead to highly vulnerable positions early.
+        """
+        if time.time() - start_time >= max_time:
+            raise TimeoutError()
+
+        # Early cutoff if position is too vulnerable
+        if not is_root:
+            vulnerability = self._calculate_vulnerability(
+                game_state,
+                self.player_holes[game_state.current_player]
+            )
+            if vulnerability < -3:  # More than 3 vulnerable positions
+                return float('-inf'), None
+
+        # Rest of minimax implementation remains similar to parent class
+        if game_state.game_over() or depth == 0:
+            return self.evaluate(game_state), None
+
+        moves = self._order_moves(game_state, game_state.get_valid_moves(), depth, is_root)
+        best_value = float('-inf') if maximizing_player else float('inf')
+        best_move = None
+
+        for move in moves:
+            # Skip moves that immediately lead to captures
+            clone_state = game_state.clone()
+            clone_state.play_move(*move)
+            if self._count_opponent_capture_opportunities(clone_state) > 0:
+                continue
+
+            eval_val, _ = self.minimax(
+                clone_state,
+                depth - 1,
+                alpha,
+                beta,
+                not maximizing_player,
+                start_time,
+                max_time,
+                is_root=False
+            )
+
+            if maximizing_player:
+                if eval_val > best_value:
+                    best_value = eval_val
+                    best_move = move
+                alpha = max(alpha, best_value)
+            else:
+                if eval_val < best_value:
+                    best_value = eval_val
+                    best_move = move
+                beta = min(beta, best_value)
+
+            if beta <= alpha:
+                break
+
+        return best_value, best_move
+
+class DefensiveAgent:
+    def __init__(self, max_depth=100, max_time=2):
+        self.max_depth = max_depth
+        self.max_time = max_time
+        self.VULNERABILITY_WEIGHT = -100  # Heavy penalty for vulnerabilities
+        self.DISTRIBUTION_WEIGHT = 10    # Bonus for better distribution
+        self.MOBILITY_WEIGHT = 5         # Bonus for more available moves
+
+    def evaluate(self, game_state):
+        """
+        Defensive evaluation function prioritizing avoiding vulnerabilities.
+        """
+        my_holes = self._get_my_holes(game_state)
+        total_seeds = game_state.board.sum(axis=1)
+
+        # Vulnerability: Penalize holes with 2 or 3 seeds
+        vulnerabilities = np.sum((total_seeds == 2) | (total_seeds == 3))
+
+        # Distribution: Prefer an even spread of seeds
+        distribution = -np.std([game_state.board[hole].sum() for hole in my_holes])
+
+        # Mobility: Count available moves
+        mobility = np.sum(game_state.board[my_holes] > 0)
+
+        return (self.VULNERABILITY_WEIGHT * vulnerabilities +
+                self.DISTRIBUTION_WEIGHT * distribution +
+                self.MOBILITY_WEIGHT * mobility)
+
+    def get_move(self, game_state):
+        """
+        Determines the best defensive move using a bounded depth minimax.
+        """
+        start_time = time.time()
+        best_move = None
+        best_score = float('-inf')
+
+        for move in game_state.get_valid_moves():
+            clone = game_state.clone()
+            clone.play_move(*move)
+            score = self._minimax(clone, self.max_depth, False, start_time)
+            if score > best_score:
+                best_score = score
+                best_move = move
+
+            # Stop if time is up
+            if time.time() - start_time >= self.max_time:
+                break
+
+        compute_time = time.time() - start_time
+        return best_move, compute_time, self.max_depth
+
+
+    def _minimax(self, game_state, depth, maximizing_player, start_time):
+        """
+        Minimax algorithm with early cutoff for defensive evaluation.
+        """
+        if time.time() - start_time >= self.max_time or depth == 0 or game_state.game_over():
+            return self.evaluate(game_state)
+
+        if maximizing_player:
+            best_score = float('-inf')
+            for move in game_state.get_valid_moves():
+                clone = game_state.clone()
+                clone.play_move(*move)
+                score = self._minimax(clone, depth - 1, False, start_time)
+                best_score = max(best_score, score)
+            return best_score
+        else:
+            best_score = float('inf')
+            for move in game_state.get_valid_moves():
+                clone = game_state.clone()
+                clone.play_move(*move)
+                score = self._minimax(clone, depth - 1, True, start_time)
+                best_score = min(best_score, score)
+            return best_score
+
+    def _get_my_holes(self, game_state):
+        """
+        Helper function to get the indices of the player's holes.
+        """
+        if game_state.current_player == 1:
+            return np.arange(0, 16, 2)  # Odd-numbered holes
+        else:
+            return np.arange(1, 16, 2)  # Even-numbered holes
+
+class DefensiveMinimaxAgent(Agent):
+    def __init__(self, max_time=2):
+        self.max_time = max_time
+        self.transposition_table = {}
+        self.move_ordering = {}
+        self.MAX_TABLE_SIZE = 1000000
+
+        # Extreme defensive weights
+        self.IMMEDIATE_THREAT_WEIGHT = 10000  # Extreme penalty for immediate capture threats
+        self.SETUP_THREAT_WEIGHT = 5000       # Heavy penalty for opponent capture setups
+        self.SAFE_POSITION_WEIGHT = 100       # Reward for maintaining safe positions
+
+    def evaluate(self, game_state) -> float:
+        """
+        Focused defensive evaluation that looks for specific threatening patterns
+        and immediate capture possibilities.
+        """
+        my_index = game_state.current_player - 1
+        my_holes = game_state.player_holes[game_state.current_player]
+        opp_holes = game_state.player_holes[3 - game_state.current_player]
+
+        score = 0
+        board_sums = np.sum(game_state.board, axis=1)
+
+        # Check for immediate capture threats (holes with 1 or 4 seeds)
+        immediate_threats = np.sum((board_sums[my_holes] == 1) | (board_sums[my_holes] == 4))
+        score -= immediate_threats * self.IMMEDIATE_THREAT_WEIGHT
+
+        # Check for opponent's setup moves
+        for opp_hole in opp_holes:
+            next_hole = (opp_hole + 1) % 16
+            if next_hole in my_holes:
+                # Check if opponent can create a capture threat in one move
+                if board_sums[opp_hole] > 0:  # If opponent has seeds to move
+                    distance_to_my_hole = (next_hole - opp_hole) % 16
+                    if board_sums[opp_hole] >= distance_to_my_hole:  # Can reach my hole
+                        current_seeds = board_sums[next_hole]
+                        if current_seeds in [0, 1, 3]:  # Could become 1 or 4
+                            score -= self.SETUP_THREAT_WEIGHT
+
+        # Reward safe seed counts (0, 2, 3, 5 or more)
+        safe_positions = np.sum((board_sums[my_holes] == 0) |
+                              (board_sums[my_holes] == 2) |
+                              (board_sums[my_holes] == 3) |
+                              (board_sums[my_holes] >= 5))
+        score += safe_positions * self.SAFE_POSITION_WEIGHT
+
+        # Extra penalty for consecutive vulnerable holes
+        for i in range(len(my_holes) - 1):
+            current_hole = my_holes[i]
+            next_hole = my_holes[i + 1]
+            if ((board_sums[current_hole] == 1 or board_sums[current_hole] == 4) and
+                (board_sums[next_hole] == 1 or board_sums[next_hole] == 4)):
+                score -= self.IMMEDIATE_THREAT_WEIGHT * 2
+
+        return score
+
+    def get_move(self, game_state):
+        """
+        Prioritize checking immediate defensive moves before deeper search.
+        """
+        # First, check for immediate defensive needs
+        urgent_move = self.find_urgent_defensive_move(game_state)
+        if urgent_move:
+            return urgent_move, 0, 1
+
+        # If no urgent moves, proceed with regular minimax search
+        start_time = time.time()
+        depth = 1
+        best_move_found = None
+
+        while True:
+            if time.time() - start_time >= self.max_time:
+                break
+
+            try:
+                eval_val, move = self.minimax(
+                    game_state.clone(),
+                    depth,
+                    alpha=-math.inf,
+                    beta=math.inf,
+                    maximizing_player=True,
+                    start_time=start_time,
+                    max_time=self.max_time,
+                    is_root=True
+                )
+
+                if move is not None:
+                    best_move_found = move
+                    self.move_ordering[move] = eval_val
+
+            except TimeoutError:
+                break
+
+            depth += 1
+
+        compute_time = time.time() - start_time
+        return (best_move_found, compute_time, depth - 1)
+
+    def find_urgent_defensive_move(self, game_state):
+        """
+        Check for immediate defensive moves needed to prevent captures.
+        """
+        board_sums = np.sum(game_state.board, axis=1)
+        my_holes = game_state.player_holes[game_state.current_player]
+
+        # First priority: Fix any holes with 1 or 4 seeds
+        vulnerable_holes = [h for h in my_holes if board_sums[h] in [1, 4]]
+        for hole in vulnerable_holes:
+            # Try to move seeds from this hole if possible
+            for color in [0, 1]:  # Try both red and blue
+                if game_state.board[hole, color] > 0:
+                    clone = game_state.clone()
+                    clone.play_move(hole, color)
+                    # Check if move improves situation
+                    new_sums = np.sum(clone.board, axis=1)
+                    if not any((new_sums[my_holes] == 1) | (new_sums[my_holes] == 4)):
+                        return (hole, color)
+
+        # Second priority: Prevent opponent from setting up captures
+        opp_holes = game_state.player_holes[3 - game_state.current_player]
+        for opp_hole in opp_holes:
+            next_hole = (opp_hole + 1) % 16
+            if next_hole in my_holes and board_sums[next_hole] in [0, 1, 3]:
+                # Find defensive move to protect this hole
+                for hole in my_holes:
+                    for color in [0, 1]:
+                        if game_state.board[hole, color] > 0:
+                            clone = game_state.clone()
+                            clone.play_move(hole, color)
+                            new_sums = np.sum(clone.board, axis=1)
+                            if new_sums[next_hole] not in [1, 4]:
+                                return (hole, color)
+
+        return None
+
+    def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time, is_root=False):
+        if time.time() - start_time >= max_time:
+            raise TimeoutError()
+
+        state_hash = hash((game_state.board.tobytes(), game_state.current_player))
+
+        if not is_root:
+            if state_hash in self.transposition_table:
+                stored_depth, stored_value, stored_flag = self.transposition_table[state_hash]
+                if stored_depth >= depth:
+                    return stored_value, None
+
+        if game_state.game_over() or depth == 0:
+            return self.evaluate(game_state), None
+
+        moves = game_state.get_valid_moves()
+        if not moves:
+            return self.evaluate(game_state), None
+
+        # Sort moves based on previous evaluations
+        moves = sorted(moves, key=lambda m: self.move_ordering.get(m, float('-inf')), reverse=True)
+
+        best_move = None
+        if maximizing_player:
+            best_value = float('-inf')
+            for move in moves:
+                clone_state = game_state.clone()
+                clone_state.play_move(*move)
+
+                # Quick check for obviously bad moves
+                if not is_root:
+                    board_sums = np.sum(clone_state.board, axis=1)
+                    my_holes = clone_state.player_holes[game_state.current_player]
+                    if any((board_sums[my_holes] == 1) | (board_sums[my_holes] == 4)):
+                        continue
+
+                eval_val, _ = self.minimax(clone_state, depth - 1, alpha, beta, False, start_time, max_time)
+
+                if eval_val > best_value:
+                    best_value = eval_val
+                    best_move = move
+                alpha = max(alpha, eval_val)
+                if beta <= alpha:
+                    break
+        else:
+            best_value = float('inf')
+            for move in moves:
+                clone_state = game_state.clone()
+                clone_state.play_move(*move)
+                eval_val, _ = self.minimax(clone_state, depth - 1, alpha, beta, True, start_time, max_time)
+
+                if eval_val < best_value:
+                    best_value = eval_val
+                    best_move = move
+                beta = min(beta, eval_val)
+                if beta <= alpha:
+                    break
+
+        if len(self.transposition_table) < self.MAX_TABLE_SIZE:
+            self.transposition_table[state_hash] = (depth, best_value, best_move)
+
+        return best_value, best_move
+
+class MinimaxAgentBizarreLeMec:
+    """
+    This agent extends MinimaxAgent6_4 with:
+      - Iterative Deepening
+      - Principal Variation Search (PVS)
+      - Late Move Reductions (LMR)
+      - History Heuristic
+      - Refined Killer Move logic
+      - (Null Move Pruning is carried over from parent)
+    """
+
+    def __init__(self, max_time=2):
+        self.max_time = max_time
+        self.nodes_cut = 0
+        self.transposition_table = {}
+        # track best move from last completed depth
+        self.principal_variation_move = None
+
+        # A dictionary counting how often moves cause beta-cutoffs
+        # for move ordering: { move: score }
+        self.history_scores = defaultdict(int)
+
+        # Killer moves: store up to 2 killers for each search depth
+        self.killer_moves = defaultdict(lambda: [])
+
+        # Some constants
+        self.FLAG_EXACT = 0
+        self.FLAG_LOWERBOUND = 1
+        self.FLAG_UPPERBOUND = 2
+
+        # For demonstration: we keep your evaluation weights from original
+        self.SCORE_WEIGHT = 50
+        self.CONTROL_WEIGHT = 30
+        self.CAPTURE_WEIGHT = 20
+        self.MOBILITY_WEIGHT = 15
+
+        # The internal iterative deepening search limit
+        self.max_depth = 30  # or any large enough depth
+
+    def evaluate(self, game_state):
+        """
+        Same evaluate() from your original code:
+        an example of a heuristic combining multiple factors.
+        """
+        my_index = game_state.current_player - 1
+        opp_index = 1 - my_index
+
+        score_diff = game_state.scores[my_index] - game_state.scores[opp_index]
+
+        my_holes = game_state.player_holes[game_state.current_player]
+        opp_holes = game_state.player_holes[3 - game_state.current_player]
+
+        my_seeds = np.sum(game_state.board[my_holes])
+        opp_seeds = np.sum(game_state.board[opp_holes])
+
+        total_seeds = np.sum(game_state.board, axis=1)
+        capture_positions = (total_seeds == 1) | (total_seeds == 4)
+        capture_potential = (np.sum(capture_positions[my_holes]) -
+                             np.sum(capture_positions[opp_holes])) * 2
+
+        my_mobility = np.sum(game_state.board[my_holes] > 0)
+        opp_mobility = np.sum(game_state.board[opp_holes] > 0)
+
+        return (self.SCORE_WEIGHT * score_diff
+                + self.CONTROL_WEIGHT * (my_seeds - opp_seeds)
+                + self.CAPTURE_WEIGHT * capture_potential
+                + self.MOBILITY_WEIGHT * (my_mobility - opp_mobility))
+
+    def get_move(self, game_state):
+        """
+        Iterative Deepening + PVS driver.
+        We iterate depth = 1..max_depth until time is up or we've completed a depth.
+        We store the best move found in self.principal_variation_move after each iteration.
+        """
+        start_time = time.time()
+        best_move_found = None
+        depth_completed = 0
+
+        # We'll do iterative deepening from depth=1 upwards
+        for depth in range(1, self.max_depth + 1):
+            if time.time() - start_time >= self.max_time:
+                break
+
+            alpha = -math.inf
+            beta = math.inf
+
+            try:
+                value, move = self._pvs(game_state.clone(), depth, alpha, beta, True, start_time)
+                if move is not None:
+                    best_move_found = move
+                    self.principal_variation_move = move
+                depth_completed = depth
+            except TimeoutError:
+                # out of time in middle of search
+                break
+
+        total_time = time.time() - start_time
+        return (best_move_found, total_time, depth_completed)
+
+    def _pvs(self, game_state, depth, alpha, beta, maximizing_player, start_time):
+        """
+        Principal Variation Search (PVS) with:
+         - Transposition table lookups
+         - Move ordering (PV move first, killer moves, history heuristic, LMR)
+         - Null move pruning
+        If time runs out, we raise TimeoutError to break search early.
+        Returns (best_value, best_move).
+        """
+
+        # Time check
+        if time.time() - start_time >= self.max_time:
+            raise TimeoutError()
+
+        # Depth or game-over check
+        if depth == 0 or game_state.game_over():
+            return (self.evaluate(game_state), None)
+
+        # Transposition table lookup
+        state_hash = self._get_state_hash(game_state)
+        alpha_original = alpha
+        beta_original = beta
+
+        if state_hash in self.transposition_table:
+            stored_depth, stored_value, stored_flag, stored_move = self.transposition_table[state_hash]
+            if stored_depth >= depth:
+                if stored_flag == self.FLAG_EXACT:
+                    return (stored_value, stored_move)
+                elif stored_flag == self.FLAG_LOWERBOUND:
+                    alpha = max(alpha, stored_value)
+                elif stored_flag == self.FLAG_UPPERBOUND:
+                    beta = min(beta, stored_value)
+                if alpha >= beta:
+                    self.nodes_cut += 1
+                    return (stored_value, stored_move)
+
+        # *** Null-Move Pruning *** (optional, if we allow it)
+        # Avoid if near terminal or too shallow
+        if maximizing_player and depth >= 3 and not game_state.game_over():
+            # pass the turn to see if the evaluation is big enough to prune
+            clone_null = game_state.clone()
+            # "null move" => skip current player's move
+            clone_null.current_player = 3 - clone_null.current_player
+
+            try:
+                null_val, _ = self._pvs(clone_null, depth - 1 - 2, alpha, beta,
+                                        not maximizing_player, start_time)
+                if null_val >= beta:
+                    return (beta, None)  # fails high => prune
+            except TimeoutError:
+                raise
+
+        valid_moves = game_state.get_valid_moves()
+        if not valid_moves:
+            return (self.evaluate(game_state), None)
+
+        # Order moves:
+        #   1) principal_variation_move (if is root or we have a stored PV)
+        #   2) killer moves
+        #   3) history heuristic
+        #   4) capture or likely capture moves (optional refinement)
+        #   5) everything else
+        ordered_moves = self._order_moves(game_state, valid_moves, depth, maximizing_player)
+
+        best_value = float('-inf') if maximizing_player else float('inf')
+        best_move = None
+        first_move = True
+
+        for move_index, move in enumerate(ordered_moves):
+            # Late Move Reduction (LMR) heuristic
+            # If we are beyond some minimal depth and we've tried many moves
+            # (move_index > say 3 or 4), reduce search by 1
+            reduction = 0
+            if depth >= 3 and move_index > 3:
+                reduction = 1
+
+            # Principal Variation Search
+            clone_state = game_state.clone()
+            clone_state.play_move(*move)
+
+            # If it's the first move in the node, we search fully
+            if first_move:
+                try:
+                    val, _ = self._pvs(clone_state, depth - 1, alpha, beta,
+                                       not maximizing_player, start_time)
+                except TimeoutError:
+                    raise
+                first_move = False
+            else:
+                # For subsequent moves, search with a *narrow window* first
+                try:
+                    # reduced depth if LMR
+                    val, _ = self._pvs(clone_state, depth - 1 - reduction,
+                                       alpha, alpha + 1,
+                                       not maximizing_player, start_time)
+                except TimeoutError:
+                    raise
+
+                # If that “fails high,” we re-search fully
+                if val > alpha and val < beta and maximizing_player:
+                    try:
+                        val, _ = self._pvs(clone_state, depth - 1,
+                                           alpha, beta,
+                                           not maximizing_player, start_time)
+                    except TimeoutError:
+                        raise
+                elif val < beta and val > alpha and not maximizing_player:
+                    # min fails low
+                    try:
+                        val, _ = self._pvs(clone_state, depth - 1,
+                                           alpha, beta,
+                                           not maximizing_player, start_time)
+                    except TimeoutError:
+                        raise
+
+            # Update alpha/beta
+            if maximizing_player:
+                if val > best_value:
+                    best_value = val
+                    best_move = move
+                alpha = max(alpha, best_value)
+            else:
+                if (best_value == float('inf')) or val < best_value:
+                    best_value = val
+                    best_move = move
+                beta = min(beta, best_value)
+
+            # killer / history updates if we get a cutoff
+            if alpha >= beta:
+                self.nodes_cut += 1
+                # killer move
+                kmoves = self.killer_moves[depth]
+                if move not in kmoves:
+                    kmoves.append(move)
+                    if len(kmoves) > 2:
+                        kmoves.pop(0)
+                # history heuristic: increment
+                self.history_scores[move] += depth * depth
+                break
+            else:
+                # If no cutoff, partially reward moves that improved alpha or beta
+                if maximizing_player and val > alpha_original:
+                    self.history_scores[move] += depth
+                if not maximizing_player and val < beta_original:
+                    self.history_scores[move] += depth
+
+        # Store in transposition table
+        if len(self.transposition_table) < 1_000_000:  # limit size
+            flag = self.FLAG_EXACT
+            if best_value <= alpha_original:
+                flag = self.FLAG_UPPERBOUND
+            elif best_value >= beta_original:
+                flag = self.FLAG_LOWERBOUND
+            self.transposition_table[state_hash] = (depth, best_value, flag, best_move)
+
+        return (best_value, best_move)
+
+    def _get_state_hash(self, game_state):
+        """
+        A compact representation of the game state for the transposition table.
+        """
+        return hash((game_state.board.tobytes(),
+                     game_state.scores.tobytes(),
+                     game_state.current_player))
+
+    def _order_moves(self, game_state, moves, depth, maximizing_player):
+        """
+        Move ordering combining:
+          1) Principal Variation Move
+          2) Killer Moves
+          3) History Heuristic
+          4) Others
+        """
+        # If we have a known PV move at root or from TT
+        # we can place it in front
+        if self.principal_variation_move in moves and depth == self.max_depth:
+            # put PV move in front
+            moves.remove(self.principal_variation_move)
+            moves = [self.principal_variation_move] + moves
+
+        # Next, gather killer moves for this depth
+        # so we can put them next
+        killer_list = self.killer_moves[depth]
+        killers_in_moves = []
+        rest = []
+        for m in moves:
+            if m in killer_list and m not in killers_in_moves:
+                killers_in_moves.append(m)
+            else:
+                rest.append(m)
+
+        # Sort the remaining moves by history scores (descending)
+        rest.sort(key=lambda mv: self.history_scores.get(mv, 0), reverse=True)
+
+        # Combine them
+        combined = killers_in_moves + rest
+        return combined

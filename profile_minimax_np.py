@@ -1,7 +1,7 @@
 import cProfile
 import pstats
 import io
-from agents_np import ClaudeMinimaxAgentV1, RandomAgent
+import agents_np
 from board_rules_interface_np import AwaleGame
 
 def profile_minimax(agent, opponent_agent, num_games=1):
@@ -34,8 +34,8 @@ def profile_minimax(agent, opponent_agent, num_games=1):
 
 if __name__ == "__main__":
     # Initialiser les agents
-    minimax_agent = ClaudeMinimaxAgentV1(max_time=2)
-    random_agent = RandomAgent()
+    MinimaxAgent6_4 = agents_np.MinimaxAgent6_4_1(max_time=2)
+    MinimaxAgent6 = agents_np.RandomAgent()
 
     # Profilage : Minimax vs RandomAgent
-    profile_minimax(minimax_agent, random_agent, num_games=3)
+    profile_minimax(MinimaxAgent6_4, MinimaxAgent6, num_games=1)

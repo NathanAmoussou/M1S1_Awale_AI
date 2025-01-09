@@ -111,8 +111,8 @@ def run_multiple_games(num_games, agent1_class, agent2_class, max_time=2, direct
 
 if __name__ == "__main__":
     num_games = 1
-    agent1_class = agents_np.MinimaxAgent6_4
-    agent2_class = agents_np.HumanAgent
+    agent1_class = agents_np.HumanAgent
+    agent2_class = agents_np.MinimaxAgent6_4
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
     run_multiple_games(
