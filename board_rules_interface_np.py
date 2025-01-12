@@ -1,4 +1,3 @@
-#board_rules_interface_np.py
 import numpy as np
 from typing import List, Tuple
 
@@ -157,7 +156,7 @@ class AwaleGame:
         return (total_seeds < 8 or
                 np.max(self.scores) >= 33 or
                 (self.scores[0] == 32 and self.scores[1] == 32) or
-                self.turn_number >= 150)
+                self.turn_number >= 300)
 
     def get_winner(self):
         if self.scores[0] > self.scores[1]:

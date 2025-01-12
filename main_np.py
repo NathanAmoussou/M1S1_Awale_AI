@@ -1,4 +1,3 @@
-#main_np.py
 from board_rules_interface_np import AwaleGame
 import agents_np
 import data_export_np
@@ -116,7 +115,7 @@ if __name__ == "__main__":
     directory = 'game_datas'
     csv_filename = get_next_filename(directory, agent1_class, agent2_class, num_games)
     run_multiple_games(
-        num_games=num_games,  # Adjust the number as needed
+        num_games=num_games,
         agent1_class=agent1_class,
         agent2_class=agent2_class,
         directory=directory,

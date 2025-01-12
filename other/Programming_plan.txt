@@ -1,7 +1,0 @@
-Language de programmation choisie : Java.
-1. Coder awalé 2 joueurs (au moins un des deux joueurs IA).
-2. Coder minimax + alpha-beta pruning.
-   -> Donc on a la fonction d'exploration.
-(3. Calculer une nouvelle fonction d'exploration avec machine learning)
-4. Optimiser le code pour qu'il soit le plus rapide possible (pour avoir une simulation profonde).
-5. Regarde pour la machine pendant l'examen.

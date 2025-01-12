@@ -34,7 +34,7 @@ def profile_minimax(agent, opponent_agent, num_games=1):
 
 if __name__ == "__main__":
     # Initialiser les agents
-    MinimaxAgent6_4 = agents_np.MinimaxAgent6_4_1(max_time=2)
+    MinimaxAgent6_4 = agents_np.MinimaxAgent6_4(max_time=2)
     MinimaxAgent6 = agents_np.RandomAgent()
 
     # Profilage : Minimax vs RandomAgent
