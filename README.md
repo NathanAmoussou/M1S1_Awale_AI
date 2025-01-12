@@ -1,5 +1,10 @@
 # Awale AI Competition Project
 
+## Students Information
+
+- **Student 1**: Nathan AMOUSSOU
+- **Student 2**: Ismail El Amrani
+
 ## Overview
 
 This project implements an AI to play a modified version of Awale using various agents, including Minimax with Alpha-Beta pruning and advanced optimizations. The program is designed to simulate games, log results, and analyze performance.
@@ -36,7 +41,7 @@ The main agent used in the competition, `MinimaxAgent6_4`, is implemented in `ag
 - Alpha-Beta pruning for efficient search.
 - Transposition table to avoid redundant calculations.
 - Move ordering for better pruning efficiency.
-- Evaluation function to assess board states.
+- Evaluation function to assess board states (see the report for more details).
 - Principal Variation search for deeper analysis of likely moves.
 - 1-ply simulation for enhanced decision-making.
 - Vectorized operations using NumPy for improved performance compared to native Python data types.
