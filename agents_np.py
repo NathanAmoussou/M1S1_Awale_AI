@@ -7,6 +7,13 @@ from collections import defaultdict
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+#agents_np.py
+import random
+import math
+import time
+import numpy as np
+from collections import defaultdict
+
 class Agent:
     """
     Abstract base class for all agents.
@@ -95,7 +102,6 @@ class MinimaxAgent6(Agent):
         self.FLAG_LOWERBOUND = 1
         self.FLAG_UPPERBOUND = 2
 
-
     def evaluate(self, game_state) -> float:
         my_index = game_state.current_player - 1
         opp_index = 1 - my_index
@@ -172,7 +178,6 @@ class MinimaxAgent6(Agent):
         return hash((game_state.board.tobytes(),
                     game_state.scores.tobytes(),
                     game_state.current_player))
-
 
     def minimax(self, game_state, depth, alpha, beta, maximizing_player, start_time, max_time, is_root=False):
         if time.time() - start_time >= max_time:
@@ -742,7 +747,6 @@ class MinimaxAgent6_4(MinimaxAgent6):
 
     # If you already have a separate "null move" or "killer move" logic in your parent,
     # you can fold that in as well, but here's the minimal approach for a refined capture check.
-
 class MinimaxAgent6_4_1(MinimaxAgent6_4):
     """
     Optimized version of MinimaxAgent6_4 with:
@@ -1195,7 +1199,7 @@ class HailMarry(MinimaxAgent6_4):
         self.CONTROL_WEIGHT = 0
         self.CAPTURE_WEIGHT = 0
         self.MOBILITY_WEIGHT = 0
-        self.DISTRIBUTION_WEIGHT = 1000
+        self.DISTRIBUTION_WEIGHT = 100
 
 class MinimaxAgent6_5(MinimaxAgent6):
     """

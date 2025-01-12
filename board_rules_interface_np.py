@@ -72,7 +72,7 @@ class AwaleGame:
 
         if self.scores[0] == self.scores[1]:
             print("WINNER: TIE")
-        elif self.turn_number >= 150:
+        elif self.turn_number >= 300:
             print("WINNER: TIE (turn limit reached)")
         else:
             winner = 1 if self.scores[0] > self.scores[1] else 2
