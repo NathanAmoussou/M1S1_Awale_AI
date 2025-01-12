@@ -3,7 +3,7 @@
 ## Students Information
 
 - **Student 1**: Nathan AMOUSSOU
-- **Student 2**: Ismail El Amrani
+- **Student 2**: Ismail EL AMRANI
 
 ## Overview
 
